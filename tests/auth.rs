@@ -98,7 +98,7 @@ mod auth {
     /// El tipo `Token` redacta su valor tanto en `Debug` como en `Display`.
     #[test]
     fn token_redacta_su_valor_en_debug_y_display() {
-        let token = Token::from("ghp_secreto_super_secreto");
+        let token = Token::new("ghp_secreto_super_secreto").expect("token válido");
 
         let debug = format!("{token:?}");
         let display = format!("{token}");
@@ -113,5 +113,54 @@ mod auth {
         );
         assert_eq!(debug, "Token(***)");
         assert_eq!(display, "***");
+    }
+
+    /// Valor secreto reconocible para comprobar la redacción transitiva.
+    const SECRETO: &str = "ghp_SECRETO_IRRECONOCIBLE_1234567890";
+
+    /// Estructura local que envuelve un `Token` y deriva `Debug`.
+    ///
+    /// Sirve para comprobar que la redacción del token se propaga: si `Token`
+    /// delegara en su `String` interno, este `Debug` filtraría el secreto.
+    #[derive(Debug)]
+    struct Envoltorio {
+        token: Token,
+    }
+
+    /// La redacción es transitiva y ni el `Debug` de una estructura ni los
+    /// mensajes de error exponen el token.
+    ///
+    /// `AuthError` no puede transportar un token porque es un enum cerrado sin
+    /// ninguna variante que contenga un `String` con la credencial: las
+    /// variantes de fallo de `gh` guardan como mucho un código de salida.
+    #[test]
+    fn la_redaccion_del_token_no_se_filtra_en_estructuras_ni_errores() {
+        let envoltorio = Envoltorio {
+            token: Token::new(SECRETO).expect("token válido"),
+        };
+
+        let debug_estructura = format!("{envoltorio:?}");
+        assert!(
+            !debug_estructura.contains(SECRETO),
+            "el Debug de la estructura filtra el secreto: {debug_estructura}"
+        );
+
+        let display_token = format!("{}", envoltorio.token);
+        assert!(
+            !display_token.contains(SECRETO),
+            "el Display del token filtra el secreto: {display_token}"
+        );
+
+        let err = resolve_token_from(|_| None, || Err(AuthError::GhNotInstalled))
+            .expect_err("sin credenciales la resolución debe fallar");
+        let debug_error = format!("{err:?}");
+        assert!(
+            !debug_error.contains(SECRETO),
+            "el Debug del error filtra el secreto: {debug_error}"
+        );
+        assert!(
+            !err.to_string().contains(SECRETO),
+            "el Display del error filtra el secreto: {err}"
+        );
     }
 }

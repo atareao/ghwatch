@@ -30,6 +30,27 @@ pub const ENV_VAR: &str = "GITHUB_TOKEN";
 pub struct Token(String);
 
 impl Token {
+    /// Construye un token a partir de un valor, validando que no esté vacío.
+    ///
+    /// El valor se recorta por delante y por detrás: un token nunca debería
+    /// tener espacios, y un valor vacío o en blanco no es una credencial
+    /// válida. Al centralizar aquí la validación, el tipo `Token` garantiza su
+    /// invariante y no existe una vía pública para crear uno vacío.
+    ///
+    /// # Errores
+    ///
+    /// Devuelve [`AuthError::EmptyToken`] si, tras recortar, el valor queda
+    /// vacío.
+    // Nota: no se marca `#[must_use]` porque `Result` ya lo es y sería redundante.
+    pub fn new(valor: impl Into<String>) -> Result<Self, AuthError> {
+        let valor = valor.into();
+        let recortado = valor.trim();
+        if recortado.is_empty() {
+            return Err(AuthError::EmptyToken);
+        }
+        Ok(Self(recortado.to_string()))
+    }
+
     /// Devuelve el valor en claro del token.
     ///
     /// Es el único punto de fuga deliberado. Quien lo use asume la
@@ -37,18 +58,6 @@ impl Token {
     #[must_use]
     pub fn expose_secret(&self) -> &str {
         &self.0
-    }
-}
-
-impl From<String> for Token {
-    fn from(valor: String) -> Self {
-        Self(valor)
-    }
-}
-
-impl From<&str> for Token {
-    fn from(valor: &str) -> Self {
-        Self(valor.to_string())
     }
 }
 
@@ -73,6 +82,10 @@ pub enum AuthError {
     /// La variable de entorno `GITHUB_TOKEN` no está definida.
     #[error("la variable de entorno GITHUB_TOKEN no está definida")]
     EnvVarMissing,
+
+    /// Se intentó construir un [`Token`] con un valor vacío o en blanco.
+    #[error("no se puede construir un Token vacío o compuesto solo de espacios")]
+    EmptyToken,
 
     /// La CLI `gh` no está instalada o no está disponible en el `PATH`.
     #[error("`gh` no está instalado o no está en el PATH")]
@@ -115,11 +128,37 @@ pub enum AuthError {
     },
 }
 
+/// Devuelve el token de la variable de entorno si es utilizable.
+///
+/// Un valor ausente, vacío o compuesto solo de espacios no es una credencial:
+/// en ese caso devuelve `None` para que se intente la vía de `gh`.
+fn token_from_env(env_value: Option<String>) -> Option<Token> {
+    env_value.and_then(|valor| Token::new(valor).ok())
+}
+
+/// Traduce el resultado del runner de `gh` a una credencial o a un error.
+///
+/// Una salida vacía (o en blanco) se traduce a [`AuthError::NoCredentials`] con
+/// causa [`AuthError::GhEmpty`]; cualquier otro fallo del runner se propaga
+/// envuelto en [`AuthError::NoCredentials`] para que el mensaje final explique
+/// las dos vías de autenticación.
+fn token_from_gh(gh_result: Result<String, AuthError>) -> Result<Token, AuthError> {
+    match gh_result {
+        Ok(salida) => Token::new(salida).map_err(|_| AuthError::NoCredentials {
+            cause: Box::new(AuthError::GhEmpty),
+        }),
+        Err(causa) => Err(AuthError::NoCredentials {
+            cause: Box::new(causa),
+        }),
+    }
+}
+
 /// Resuelve la credencial usando el entorno y el runner de `gh` inyectados.
 ///
 /// Es una función pura respecto al entorno del proceso: no lee variables de
 /// entorno ni lanza procesos por sí misma. Eso la hace determinista y
-/// comprobable con dobles.
+/// comprobable con dobles. Su equivalente con IO real es [`resolve_token`]
+/// (síncrono) y [`resolve_token_async`] (asíncrono).
 ///
 /// # Orden de resolución
 ///
@@ -127,35 +166,20 @@ pub enum AuthError {
 /// 2. `run_gh()`: si tiene éxito y devuelve un valor no vacío, se usa.
 /// 3. En otro caso, se devuelve [`AuthError::NoCredentials`] con la causa de `gh`.
 ///
+/// El runner de `gh` se evalúa de forma **perezosa**: si la variable de entorno
+/// ya aporta un token, `run_gh` no llega a ejecutarse.
+///
 /// # Errores
 ///
 /// Devuelve [`AuthError::NoCredentials`] cuando ninguna de las dos vías aporta
 /// una credencial. El mensaje menciona ambas vías y no contiene ningún token.
 pub fn resolve_token_from(
-    env: impl Fn(&str) -> Option<String>,
-    run_gh: impl Fn() -> Result<String, AuthError>,
+    env: impl FnOnce(&str) -> Option<String>,
+    run_gh: impl FnOnce() -> Result<String, AuthError>,
 ) -> Result<Token, AuthError> {
-    if let Some(valor) = env(ENV_VAR) {
-        let valor = valor.trim();
-        if !valor.is_empty() {
-            return Ok(Token::from(valor));
-        }
-    }
-
-    match run_gh() {
-        Ok(salida) => {
-            let salida = salida.trim();
-            if salida.is_empty() {
-                Err(AuthError::NoCredentials {
-                    cause: Box::new(AuthError::GhEmpty),
-                })
-            } else {
-                Ok(Token::from(salida))
-            }
-        }
-        Err(causa) => Err(AuthError::NoCredentials {
-            cause: Box::new(causa),
-        }),
+    match token_from_env(env(ENV_VAR)) {
+        Some(token) => Ok(token),
+        None => token_from_gh(run_gh()),
     }
 }
 
@@ -278,5 +302,26 @@ mod tests {
     fn interpret_gh_exit_no_utf8_devuelve_gh_output_not_utf8() {
         let err = interpret_gh_exit(Some(0), &[0xff, 0xfe, 0x00]).expect_err("no UTF-8 debe fallar");
         assert!(matches!(err, AuthError::GhOutputNotUtf8));
+    }
+
+    // --- Token::new: el invariante «token no vacío» lo protege el tipo ---
+
+    /// Un valor vacío se rechaza.
+    #[test]
+    fn token_new_rechaza_vacio() {
+        assert!(matches!(Token::new(""), Err(AuthError::EmptyToken)));
+    }
+
+    /// Un valor compuesto solo de espacios se rechaza.
+    #[test]
+    fn token_new_rechaza_solo_espacios() {
+        assert!(matches!(Token::new("   \n\t"), Err(AuthError::EmptyToken)));
+    }
+
+    /// Un valor válido se acepta y se recorta.
+    #[test]
+    fn token_new_recorta_y_acepta_valor_valido() {
+        let token = Token::new("  ghp_abc  ").expect("valor válido");
+        assert_eq!(token.expose_secret(), "ghp_abc");
     }
 }
