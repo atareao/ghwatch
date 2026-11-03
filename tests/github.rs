@@ -136,10 +136,18 @@ mod github {
             .await
             .expect("peticiones recibidas");
         assert_eq!(peticiones.len(), 2, "deben ser exactamente dos peticiones");
+        // wiremock reconstruye la URL con host `localhost` (el URI de origen no
+        // lleva autoridad), así que la comparación exacta se hace sobre la ruta
+        // y la consulta, que es lo que distingue seguir el `Link` de recomponerlo.
         assert_eq!(
-            peticiones[1].url.as_str(),
-            siguiente_url,
-            "la segunda petición debe ir exactamente a la URL del `Link`, sin recomponerla"
+            peticiones[1].url.path(),
+            "/repositories/459293568/dependabot/alerts",
+            "la segunda petición debe usar el prefijo del `Link`"
+        );
+        assert_eq!(
+            peticiones[1].url.query(),
+            Some("per_page=100&after=Y3Vyc29yOnYyOpPPAAAB"),
+            "la segunda petición debe arrastrar la cadena de consulta del `Link` tal cual"
         );
     }
 

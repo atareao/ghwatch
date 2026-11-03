@@ -78,7 +78,10 @@ impl GithubError {
 
 /// Clasifica una respuesta de la API de GitHub en un error tipado.
 ///
-/// Devuelve `Ok(())` para respuestas de éxito (`2xx`) y redirecciones (`3xx`).
+/// Devuelve `Ok(())` **solo** para respuestas de éxito (`2xx`). Un `3xx` no es
+/// éxito: si `reqwest` no lo siguió (por ejemplo, un `304` sin `Location`), el
+/// cuerpo no es el JSON esperado y se devuelve como [`GithubError::Http`] en
+/// lugar de intentar decodificarlo.
 ///
 /// `retry_after` es la espera ya extraída de la cabecera `Retry-After`: un
 /// `403` **con** esa cabecera es un límite secundario
@@ -92,7 +95,7 @@ impl GithubError {
 /// - [`GithubError::RateLimited`] para `403` con `Retry-After`.
 /// - [`GithubError::NotConfigured`] para `404` con `no analysis found`.
 /// - [`GithubError::NotFound`] para el resto de `404`.
-/// - [`GithubError::Http`] para cualquier otro `status >= 400`.
+/// - [`GithubError::Http`] para cualquier otro `status` que no sea `2xx`.
 pub fn classify_response(
     status: u16,
     body: &str,
@@ -111,11 +114,11 @@ pub fn classify_response(
         },
         404 if body.contains(NOT_CONFIGURED_MARKER) => Err(GithubError::NotConfigured),
         404 => Err(GithubError::NotFound),
-        400..=u16::MAX => Err(GithubError::Http {
+        200..=299 => Ok(()),
+        _ => Err(GithubError::Http {
             status,
             body: truncate_body(body),
         }),
-        _ => Ok(()),
     }
 }
 

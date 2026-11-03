@@ -407,8 +407,21 @@ impl GithubClient {
 }
 
 /// Añade `per_page` a la ruta si no está ya presente.
+///
+/// La consulta se analiza como pares `clave=valor` separados por `&`; solo se
+/// considera presente un parámetro cuya **clave** sea exactamente `per_page`.
+/// Así no se confunde con un valor como `per_page=3` dentro de otro parámetro
+/// (`otro=per_page=3`) ni con una clave que contenga la subcadena
+/// (`not_per_page`).
 fn with_per_page(path: &str, per_page: u32) -> String {
-    if path.contains("per_page=") {
+    let ya_presente = path.split_once('?').is_some_and(|(_, consulta)| {
+        consulta.split('&').any(|par| match par.split_once('=') {
+            Some((clave, _)) => clave == "per_page",
+            None => par == "per_page",
+        })
+    });
+
+    if ya_presente {
         path.to_string()
     } else if path.contains('?') {
         format!("{path}&per_page={per_page}")
