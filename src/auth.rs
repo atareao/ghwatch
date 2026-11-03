@@ -183,17 +183,55 @@ pub fn resolve_token_from(
     }
 }
 
-/// Resuelve la credencial contra el entorno real del proceso y la CLI `gh`.
+/// Resuelve la credencial contra el entorno real del proceso y la CLI `gh`
+/// de forma **síncrona**.
 ///
 /// Envoltura fina de [`resolve_token_from`] que conecta las implementaciones
-/// reales: `std::env::var` y `gh auth token`.
+/// reales: `std::env::var` y `gh auth token`. Es la vía adecuada para el
+/// arranque del CLI, donde aún no hay runtime de Tokio o donde bloquear un hilo
+/// no tiene coste. Desde código asíncrono, usa [`resolve_token_async`].
 ///
 /// # Errores
 ///
 /// Devuelve [`AuthError::NoCredentials`] si no hay credencial disponible por
 /// ninguna de las dos vías.
 pub fn resolve_token() -> Result<Token, AuthError> {
+    // `VarError::NotUnicode` se trata igual que «no definida»: un valor que no
+    // es texto UTF-8 no puede ser un token utilizable, así que se cae a `gh`.
     resolve_token_from(|clave| std::env::var(clave).ok(), run_gh_auth_token)
+}
+
+/// Núcleo asíncrono de la resolución: comparte la decisión con la vía síncrona.
+///
+/// Recibe el valor del entorno ya leído y un futuro que produce el resultado de
+/// `gh`. El futuro se resuelve de forma perezosa: si el entorno ya aporta un
+/// token utilizable, no se espera a `gh`.
+async fn resolve_from_async<F>(env_value: Option<String>, gh: F) -> Result<Token, AuthError>
+where
+    F: std::future::Future<Output = Result<String, AuthError>>,
+{
+    match token_from_env(env_value) {
+        Some(token) => Ok(token),
+        None => token_from_gh(gh.await),
+    }
+}
+
+/// Resuelve la credencial contra el entorno real y la CLI `gh` de forma
+/// **asíncrona**.
+///
+/// Usa `tokio::process::Command` en lugar de `std::process::Command`, de modo
+/// que esperar a `gh` no bloquea el hilo del executor. Es la vía adecuada
+/// cuando el cliente HTTP asíncrono (`reqwest`) va a necesitar el token desde
+/// una tarea del runtime. Comparte con [`resolve_token`] tanto la decisión
+/// (`token_from_env` / `token_from_gh`) como la interpretación de la salida
+/// ([`interpret_gh_exit`]).
+///
+/// # Errores
+///
+/// Devuelve [`AuthError::NoCredentials`] si no hay credencial disponible por
+/// ninguna de las dos vías.
+pub async fn resolve_token_async() -> Result<Token, AuthError> {
+    resolve_from_async(std::env::var(ENV_VAR).ok(), run_gh_auth_token_async()).await
 }
 
 /// Interpreta el resultado de ejecutar `gh auth token`.
@@ -256,6 +294,32 @@ fn run_gh_auth_token() -> Result<String, AuthError> {
     interpret_gh_exit(salida.status.code(), &salida.stdout)
 }
 
+/// Ejecuta `gh auth token` de forma asíncrona con `tokio::process::Command`.
+///
+/// Equivalente a [`run_gh_auth_token`] pero sin bloquear el hilo del executor.
+/// La decisión a partir del resultado la toma [`interpret_gh_exit`]; el futuro
+/// devuelto no lanza el proceso hasta que se le hace `await`, así que un token
+/// presente en el entorno evita por completo el `spawn`.
+///
+/// # Errores
+///
+/// Los mismos que [`run_gh_auth_token`].
+async fn run_gh_auth_token_async() -> Result<String, AuthError> {
+    let salida = match tokio::process::Command::new("gh")
+        .args(["auth", "token"])
+        .output()
+        .await
+    {
+        Ok(salida) => salida,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(AuthError::GhNotInstalled);
+        }
+        Err(_) => return Err(AuthError::GhFailed { code: None }),
+    };
+
+    interpret_gh_exit(salida.status.code(), &salida.stdout)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,7 +364,8 @@ mod tests {
     /// Bytes no UTF-8 producen `GhOutputNotUtf8` en lugar de corromper el token.
     #[test]
     fn interpret_gh_exit_no_utf8_devuelve_gh_output_not_utf8() {
-        let err = interpret_gh_exit(Some(0), &[0xff, 0xfe, 0x00]).expect_err("no UTF-8 debe fallar");
+        let err =
+            interpret_gh_exit(Some(0), &[0xff, 0xfe, 0x00]).expect_err("no UTF-8 debe fallar");
         assert!(matches!(err, AuthError::GhOutputNotUtf8));
     }
 
@@ -323,5 +388,37 @@ mod tests {
     fn token_new_recorta_y_acepta_valor_valido() {
         let token = Token::new("  ghp_abc  ").expect("valor válido");
         assert_eq!(token.expose_secret(), "ghp_abc");
+    }
+
+    // --- núcleo asíncrono: comparte decisión con la vía síncrona ---
+
+    /// El núcleo asíncrono prefiere el token del entorno.
+    #[tokio::test]
+    async fn resolve_from_async_prefiere_el_entorno() {
+        let token = resolve_from_async(
+            Some("ghp_env".to_string()),
+            std::future::ready(Ok("ghp_gh".to_string())),
+        )
+        .await
+        .expect("el entorno debe bastar");
+        assert_eq!(token.expose_secret(), "ghp_env");
+    }
+
+    /// El núcleo asíncrono cae al resultado de `gh` cuando no hay entorno.
+    #[tokio::test]
+    async fn resolve_from_async_cae_a_gh_sin_entorno() {
+        let token = resolve_from_async(None, std::future::ready(Ok("ghp_gh".to_string())))
+            .await
+            .expect("`gh` debe proporcionar el token");
+        assert_eq!(token.expose_secret(), "ghp_gh");
+    }
+
+    /// El núcleo asíncrono envuelve el error del runner en `NoCredentials`.
+    #[tokio::test]
+    async fn resolve_from_async_propaga_error_de_gh() {
+        let err = resolve_from_async(None, std::future::ready(Err(AuthError::GhNotInstalled)))
+            .await
+            .expect_err("sin credenciales debe fallar");
+        assert!(matches!(err, AuthError::NoCredentials { .. }));
     }
 }

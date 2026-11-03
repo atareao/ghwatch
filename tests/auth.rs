@@ -159,7 +159,10 @@ mod auth {
         .expect("con el entorno presente debe usarse ese token");
 
         assert_eq!(token.expose_secret(), "ghp_recortado");
-        assert!(!gh_invocado.get(), "no debe invocarse `gh` si el entorno vale");
+        assert!(
+            !gh_invocado.get(),
+            "no debe invocarse `gh` si el entorno vale"
+        );
     }
 
     /// El tipo `Token` redacta su valor tanto en `Debug` como en `Display`.
