@@ -33,13 +33,13 @@
 
 ## 2. Cliente GitHub
 
-- [ ] 2.1 RED — escribir el test con `wiremock` de una colección de 2 páginas servida por `Link` que debe fallar porque no hay paginación; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.2 RED — escribir el test con `wiremock` que verifica las cabeceras `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28` y `User-Agent: ghwatch`; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.3 RED — escribir el test con `wiremock` de `401` que espera error tipado de autenticación; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.4 RED — escribir el test con `wiremock` de `403` con `Retry-After: 30` que espera espera y reintento, y error tipado al superar el máximo; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.5 RED — escribir el test con `wiremock` de `404` `no analysis found` que espera resultado «no configurado» en lugar de error; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.6 RED — escribir el test con `wiremock` de `X-RateLimit-Remaining` por debajo del umbral que debe fallar porque no hay pausa preventiva; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.7 GREEN — implementar el cliente GitHub con cabeceras, paginación por `Link`, control de rate limit, reintentos con `Retry-After` y concurrencia acotada; confirmar con `cargo test github` y `cargo check`.
+- [x] 2.1 RED — escribir el test con `wiremock` de una colección de 2 páginas servida por `Link` que debe fallar porque no hay paginación; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.2 RED — escribir el test con `wiremock` que verifica las cabeceras `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28` y `User-Agent: ghwatch`; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.3 RED — escribir el test con `wiremock` de `401` que espera error tipado de autenticación; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.4 RED — escribir el test con `wiremock` de `403` con `Retry-After: 30` que espera espera y reintento, y error tipado al superar el máximo; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.5 RED — escribir el test con `wiremock` de `404` `no analysis found` que espera resultado «no configurado» en lugar de error; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.6 RED — escribir el test con `wiremock` de `X-RateLimit-Remaining` por debajo del umbral que debe fallar porque no hay pausa preventiva; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.7 GREEN — implementar el cliente GitHub con cabeceras, paginación por `Link`, control de rate limit, reintentos con `Retry-After` y concurrencia acotada; confirmar con `cargo test github` y `cargo check`.
 - [ ] 2.8 Auditoría con `@rust-reviewer` del cliente GitHub.
 
 ## 3. Inventario y recolección
