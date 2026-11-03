@@ -4,19 +4,19 @@
 
 ## 0. Aprobación (punto de parada del protocolo)
 
-- [ ] 0.1 Presentar este change (proposal + specs + design + tasks) y esperar aprobación explícita antes de tocar código.
+- [x] 0.1 Presentar este change (proposal + specs + design + tasks) y esperar aprobación explícita antes de tocar código.
 
 **Punto de parada obligatorio.** Ninguna casilla de las fases 1 a 6 ni de la fase 7 se marca hasta que exista una aprobación explícita del usuario sobre el conjunto proposal + specs + design + tasks. Sin esa aprobación no se crea el repositorio, ni se añaden dependencias, ni se escriben tests ni código. Marcar cualquier casilla posterior sin esta aprobación invalida el change.
 
 ## 1. Andamiaje y autenticación
 
-- [ ] 1.1 GREEN — `cargo init --name ghwatch` con Rust edition 2024; confirmar con `cargo check`.
-- [ ] 1.2 GREEN — declarar dependencias (tokio, clap derive, reqwest con rustls, serde/serde_json, sqlx sqlite runtime-tokio, chrono, anyhow, thiserror, tracing, indicatif, comfy-table) y `wiremock` como dev-dependency; confirmar con `cargo check`.
-- [ ] 1.3 GREEN — añadir `[lints.clippy] all = "deny"` y `rustfmt.toml`; confirmar con `cargo clippy -- -D warnings` y `cargo fmt --check`.
-- [ ] 1.4 RED — escribir el test de `auth::resolve_token` con `GITHUB_TOKEN` presente que debe fallar porque el módulo `auth` no existe; comando `cargo test auth`; pegar la salida en rojo.
-- [ ] 1.5 RED — escribir el test con `GITHUB_TOKEN` ausente y `gh` simulado que debe fallar porque no hay resolución por `gh auth token`; comando `cargo test auth`; pegar la salida en rojo.
-- [ ] 1.6 RED — escribir el test sin credenciales que espera un error tipado que menciona las dos vías y no contiene valor de token; comando `cargo test auth`; pegar la salida en rojo.
-- [ ] 1.7 GREEN — implementar el módulo `auth` con el orden `GITHUB_TOKEN` → `gh auth token` → error tipado, sin registrar el token; confirmar con `cargo test auth` y `cargo check`.
+- [x] 1.1 GREEN — `cargo init --name ghwatch` con Rust edition 2024; confirmar con `cargo check`.
+- [x] 1.2 GREEN — declarar dependencias (tokio, clap derive, reqwest con rustls, serde/serde_json, sqlx sqlite runtime-tokio, chrono, anyhow, thiserror, tracing, indicatif, comfy-table) y `wiremock` como dev-dependency; confirmar con `cargo check`.
+- [x] 1.3 GREEN — añadir `[lints.clippy] all = "deny"` y `rustfmt.toml`; confirmar con `cargo clippy -- -D warnings` y `cargo fmt --check`.
+- [x] 1.4 RED — escribir el test de `auth::resolve_token` con `GITHUB_TOKEN` presente que debe fallar porque el módulo `auth` no existe; comando `cargo test auth`; pegar la salida en rojo.
+- [x] 1.5 RED — escribir el test con `GITHUB_TOKEN` ausente y `gh` simulado que debe fallar porque no hay resolución por `gh auth token`; comando `cargo test auth`; pegar la salida en rojo.
+- [x] 1.6 RED — escribir el test sin credenciales que espera un error tipado que menciona las dos vías y no contiene valor de token; comando `cargo test auth`; pegar la salida en rojo.
+- [x] 1.7 GREEN — implementar el módulo `auth` con el orden `GITHUB_TOKEN` → `gh auth token` → error tipado, sin registrar el token; confirmar con `cargo test auth` y `cargo check`.
 - [ ] 1.8 Auditoría con `@rust-reviewer` del andamiaje y del módulo `auth`.
 
 ## 2. Cliente GitHub
