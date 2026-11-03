@@ -1,1 +1,24 @@
 /target
+
+# Bases de datos y artefactos del histórico SQLite.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Ficheros de entorno.
+.env
+.env.*
+
+# Configuración local con credenciales. La configuración de ejecución vive en
+# `~/.config/ghwatch/config.toml` (fuera del repositorio), pero se ignora un
+# `config.toml` en la raíz por si un desarrollador crea una copia local con la
+# ingest key de Valet dentro del árbol de trabajo: así no se sube por accidente.
+/config.toml
+
+# Basura de editor/SO.
+.DS_Store
+.idea/
+.vscode/
+*.swp
