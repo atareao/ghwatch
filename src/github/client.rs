@@ -454,7 +454,8 @@ mod tests {
     }
 
     /// `with_per_page` respeta una ruta sin consulta, con consulta y con
-    /// `per_page` ya presente.
+    /// `per_page` ya presente; y no confunde otro parámetro que contenga la
+    /// subcadena `per_page=` en su valor.
     #[test]
     fn with_per_page_compone_la_consulta() {
         assert_eq!(with_per_page("/items", 100), "/items?per_page=100");
@@ -465,6 +466,14 @@ mod tests {
         assert_eq!(
             with_per_page("/items?per_page=50", 100),
             "/items?per_page=50"
+        );
+        assert_eq!(
+            with_per_page("/items?otro=per_page=3", 100),
+            "/items?otro=per_page=3&per_page=100"
+        );
+        assert_eq!(
+            with_per_page("/items?not_per_page=1", 100),
+            "/items?not_per_page=1&per_page=100"
         );
     }
 

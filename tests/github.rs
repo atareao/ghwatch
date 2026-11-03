@@ -14,7 +14,7 @@ mod github {
     use ghwatch::auth::Token;
     use ghwatch::github::{GithubClient, GithubConfig, GithubError, Sleeper};
     use serde::Deserialize;
-    use wiremock::matchers::{header, method, path, query_param};
+    use wiremock::matchers::{header, method, path, query_param, query_param_is_missing};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     /// Elemento mínimo devuelto por los endpoints paginados.
@@ -79,26 +79,41 @@ mod github {
 
     // --- 2.1 Paginación por `Link` ---
 
-    /// Dos páginas encadenadas por `Link` deben devolver los elementos de ambas.
+    /// Dos páginas encadenadas por un `Link` **con forma real de cursor** (otro
+    /// prefijo de ruta y `after=`) deben devolver los elementos de ambas, y la
+    /// segunda petición debe ir **exactamente** a la URL del `Link`.
+    ///
+    /// La página 1 se monta en la ruta original y la página 2 **solo** bajo la
+    /// ruta del cursor: una implementación que recompusiera la URL en lugar de
+    /// seguir el `Link` crudo no casaría ningún mock y fallaría. La página 1 se
+    /// sirve una sola vez (`up_to_n_times(1)`) para que esa recomposición acabe
+    /// en un `404` acotado en vez de colgar el test en un bucle infinito.
     #[tokio::test]
-    async fn paginacion_recorre_dos_paginas_encadenadas_por_link() {
+    async fn paginacion_sigue_la_url_del_link_con_forma_de_cursor() {
         let server = MockServer::start().await;
-        let siguiente = format!("<{}/items?page=2>; rel=\"next\"", server.uri());
+        // El prefijo del `Link` es distinto del de la petición original.
+        let siguiente_url = format!(
+            "{uri}/repositories/459293568/dependabot/alerts?per_page=100&after=Y3Vyc29yOnYyOpPPAAAB",
+            uri = server.uri()
+        );
+        let link = format!("<{siguiente_url}>; rel=\"next\"");
 
         Mock::given(method("GET"))
-            .and(path("/items"))
-            .and(query_param("per_page", "100"))
+            .and(path("/repos/atareao/reto-python/dependabot/alerts"))
+            .and(query_param("state", "open"))
+            .and(query_param_is_missing("after"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header("Link", siguiente.as_str())
+                    .insert_header("Link", link.as_str())
                     .set_body_json(serde_json::json!([{ "id": 1 }, { "id": 2 }])),
             )
+            .up_to_n_times(1)
             .mount(&server)
             .await;
 
         Mock::given(method("GET"))
-            .and(path("/items"))
-            .and(query_param("page", "2"))
+            .and(path("/repositories/459293568/dependabot/alerts"))
+            .and(query_param("after", "Y3Vyc29yOnYyOpPPAAAB"))
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "id": 3 }])),
             )
@@ -107,22 +122,24 @@ mod github {
 
         let (client, _sleeper) = cliente(&server);
         let items: Vec<Item> = client
-            .get_paginated("/items")
+            .get_paginated("/repos/atareao/reto-python/dependabot/alerts?state=open")
             .await
-            .expect("la paginación debería recorrer las dos páginas");
+            .expect("la paginación debería recorrer las dos páginas siguiendo el `Link`");
 
         assert_eq!(
             items.iter().map(|item| item.id).collect::<Vec<_>>(),
             vec![1, 2, 3]
         );
+
+        let peticiones = server
+            .received_requests()
+            .await
+            .expect("peticiones recibidas");
+        assert_eq!(peticiones.len(), 2, "deben ser exactamente dos peticiones");
         assert_eq!(
-            server
-                .received_requests()
-                .await
-                .expect("peticiones recibidas")
-                .len(),
-            2,
-            "no debe pedirse una tercera página tras la página sin `rel=\"next\"`"
+            peticiones[1].url.as_str(),
+            siguiente_url,
+            "la segunda petición debe ir exactamente a la URL del `Link`, sin recomponerla"
         );
     }
 

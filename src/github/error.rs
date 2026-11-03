@@ -138,10 +138,26 @@ mod tests {
         assert!(classify_response(200, "{}", None).is_ok());
     }
 
-    /// Una redirección tampoco se considera error.
+    /// Una redirección que `reqwest` no sigue (por ejemplo, un `304` sin
+    /// `Location`) **no** es un éxito: se trata como `Http` para no intentar
+    /// decodificar después un cuerpo que no es el JSON esperado.
     #[test]
-    fn classify_response_3xx_es_ok() {
-        assert!(classify_response(302, "", None).is_ok());
+    fn classify_response_3xx_es_http() {
+        let err = classify_response(304, "", None).expect_err("un 304 no es un éxito");
+        match err {
+            GithubError::Http { status, .. } => assert_eq!(status, 304),
+            otro => panic!("se esperaba Http, no: {otro:?}"),
+        }
+    }
+
+    /// Un `302` tampoco se considera éxito por sí mismo.
+    #[test]
+    fn classify_response_302_es_http() {
+        let err = classify_response(302, "", None).expect_err("un 302 no es un éxito");
+        match err {
+            GithubError::Http { status, .. } => assert_eq!(status, 302),
+            otro => panic!("se esperaba Http, no: {otro:?}"),
+        }
     }
 
     /// Un `401` es `Unauthorized`.
