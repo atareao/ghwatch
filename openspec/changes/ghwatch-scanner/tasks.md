@@ -17,7 +17,19 @@
 - [x] 1.5 RED — escribir el test con `GITHUB_TOKEN` ausente y `gh` simulado que debe fallar porque no hay resolución por `gh auth token`; comando `cargo test auth`; pegar la salida en rojo.
 - [x] 1.6 RED — escribir el test sin credenciales que espera un error tipado que menciona las dos vías y no contiene valor de token; comando `cargo test auth`; pegar la salida en rojo.
 - [x] 1.7 GREEN — implementar el módulo `auth` con el orden `GITHUB_TOKEN` → `gh auth token` → error tipado, sin registrar el token; confirmar con `cargo test auth` y `cargo check`.
-- [ ] 1.8 Auditoría con `@rust-reviewer` del andamiaje y del módulo `auth`.
+- [x] 1.8 Auditoría con `@rust-reviewer` del andamiaje y del módulo `auth`.
+
+### 1.9 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la Fase 1 (veredicto: aprobado con reservas, cero bloqueantes). Todos aplicados con TDD (rojo → verde).
+
+- [x] 1.9.1 Punto 1 — sustituir la aserción anti-fuga tautológica por un test real (estructura local `Envoltorio` con `Debug` que contiene un `Token`; comprobar que el `Debug` de la estructura y el `Debug`/`Display` del error no filtran el secreto). Verificación: `cargo test auth`.
+- [x] 1.9.2 Punto 2 — extraer la interpretación de la salida de `gh` a la función pura `interpret_gh_exit(code, stdout)` y cubrir sus ramas (éxito, código≠0, código ausente, vacío, solo espacios, no-UTF-8). Verificación: `cargo test auth`.
+- [x] 1.9.3 Punto 3 — corregir la cobertura fantasma: test real con salida vacía (`Ok("   ")`), renombrar el caso que inyectaba `Err(GhEmpty)`, y cubrir el fallthrough de `GITHUB_TOKEN` vacío/en blanco y el recorte del entorno. Verificación: `cargo test auth`.
+- [x] 1.9.4 Punto 4 — sustituir `String::from_utf8_lossy` por conversión estricta `String::from_utf8` con la nueva variante `AuthError::GhOutputNotUtf8`. Verificación: `cargo test auth`.
+- [x] 1.9.5 Punto 5 — añadir la vía asíncrona `resolve_token_async()` con `tokio::process::Command` y su núcleo `resolve_from_async`, compartiendo la lógica de decisión y la interpretación con la vía síncrona. Verificación: `cargo test auth`.
+- [x] 1.9.6 Punto 6 — endurecer `Token` con `Token::new()` (rechaza vacío/solo espacios, `AuthError::EmptyToken`) y eliminar los `impl From<String>`/`From<&str>` públicos. Verificación: `cargo test auth`.
+- [x] 1.9.7 Punto 7 — `impl FnOnce` en `resolve_token_from`, comentario sobre `VarError::NotUnicode` y reescritura del doc de módulo (exposición solo vía `expose_secret` y uso síncrono/asíncrono). Verificación: `cargo test`, `cargo clippy --all-targets -- -D warnings` y `cargo fmt --all --check`.
 
 ## 2. Cliente GitHub
 
