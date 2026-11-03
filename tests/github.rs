@@ -99,7 +99,9 @@ mod github {
         Mock::given(method("GET"))
             .and(path("/items"))
             .and(query_param("page", "2"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "id": 3 }])))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "id": 3 }])),
+            )
             .mount(&server)
             .await;
 
@@ -131,7 +133,9 @@ mod github {
 
         Mock::given(method("GET"))
             .and(path("/items"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "id": 1 }])))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "id": 1 }])),
+            )
             .mount(&server)
             .await;
 
@@ -166,7 +170,9 @@ mod github {
             .and(header("accept", "application/vnd.github+json"))
             .and(header("x-github-api-version", "2022-11-28"))
             .and(header("authorization", "Bearer ghp_token_de_prueba"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
             .mount(&server)
             .await;
 
@@ -178,7 +184,10 @@ mod github {
 
         assert_eq!(valor["ok"], serde_json::json!(true));
 
-        let peticiones = server.received_requests().await.expect("peticiones recibidas");
+        let peticiones = server
+            .received_requests()
+            .await
+            .expect("peticiones recibidas");
         assert_eq!(peticiones.len(), 1);
         let cabeceras = &peticiones[0].headers;
 
@@ -252,7 +261,9 @@ mod github {
 
         Mock::given(method("GET"))
             .and(path("/recurso"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
             .with_priority(2)
             .mount(&server)
             .await;
@@ -357,7 +368,8 @@ mod github {
         Mock::given(method("GET"))
             .and(path("/repos/acme/inexistente"))
             .respond_with(
-                ResponseTemplate::new(404).set_body_json(serde_json::json!({ "message": "Not Found" })),
+                ResponseTemplate::new(404)
+                    .set_body_json(serde_json::json!({ "message": "Not Found" })),
             )
             .mount(&server)
             .await;
@@ -401,7 +413,9 @@ mod github {
         Mock::given(method("GET"))
             .and(path("/items"))
             .and(query_param("page", "2"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "id": 2 }])))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "id": 2 }])),
+            )
             .mount(&server)
             .await;
 
@@ -413,7 +427,8 @@ mod github {
         assert!(
             esperas
                 .iter()
-                .any(|espera| *espera >= Duration::from_secs(25) && *espera <= Duration::from_secs(30)),
+                .any(|espera| *espera >= Duration::from_secs(25)
+                    && *espera <= Duration::from_secs(30)),
             "no se solicitó una espera coherente con el reset: {esperas:?}"
         );
     }
@@ -442,7 +457,10 @@ mod github {
         match err {
             GithubError::Http { status, body } => {
                 assert_eq!(status, 500);
-                assert!(body.contains("boom"), "el cuerpo debería conservarse: {body}");
+                assert!(
+                    body.contains("boom"),
+                    "el cuerpo debería conservarse: {body}"
+                );
             }
             otro => panic!("se esperaba Http, no: {otro:?}"),
         }
