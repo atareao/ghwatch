@@ -47,10 +47,14 @@ pub fn rate_limit_state(
 
 /// Decide cuánto esperar antes de la siguiente petición.
 ///
-/// Devuelve `Some(espera)` cuando la cuota restante está **por debajo** del
-/// umbral: la espera es hasta `reset` y, si no se conoce, [`FALLBACK_PAUSE`].
-/// Devuelve `None` cuando no hay información de cuota o cuando queda cuota
-/// suficiente, casos en los que no procede pausar.
+/// Devuelve `Some(espera)` **solo** cuando la cuota restante está **por debajo**
+/// del umbral: la espera es hasta `reset` y, si no se conoce, [`FALLBACK_PAUSE`].
+///
+/// Sin una lectura de `X-RateLimit-Remaining` no hay pausa: `remaining == None`
+/// devuelve `None` aunque se conozca `reset`. Decisión deliberada: [`FALLBACK_PAUSE`]
+/// es una espera conservadora para un caso en el que **sí** consta que la cuota
+/// está baja pero no cuándo se repone; inventar una pausa cuando ni siquiera se
+/// ha leído la cuota restante penalizaría el escaneo sin ninguna evidencia.
 #[must_use]
 pub fn should_pause_before_request(state: &RateLimitState, threshold: u64) -> Option<Duration> {
     let remaining = state.remaining?;
@@ -166,6 +170,17 @@ mod tests {
             should_pause_before_request(&estado, 100),
             Some(FALLBACK_PAUSE)
         );
+    }
+
+    /// Sin `Remaining` legible **no** se pausa aunque haya `Reset`: no se aplica
+    /// la espera conservadora sin evidencia de que la cuota esté baja.
+    #[test]
+    fn should_pause_sin_remaining_con_reset_no_pausa() {
+        let estado = RateLimitState {
+            remaining: None,
+            reset: Some(Duration::from_secs(10)),
+        };
+        assert_eq!(should_pause_before_request(&estado, 100), None);
     }
 
     /// Sin cabeceras no se pausa.
