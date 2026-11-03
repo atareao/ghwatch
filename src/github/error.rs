@@ -283,7 +283,9 @@ mod tests {
         assert!(is_disabled_body(
             "{\"message\":\"DEPENDABOT ALERTS ARE DISABLED FOR THIS REPOSITORY.\"}"
         ));
-        assert!(!is_disabled_body("{\"message\":\"Resource not accessible\"}"));
+        assert!(!is_disabled_body(
+            "{\"message\":\"Resource not accessible\"}"
+        ));
         assert!(!is_disabled_body(""));
     }
 

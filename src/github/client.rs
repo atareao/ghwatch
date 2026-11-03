@@ -644,15 +644,13 @@ mod tests {
             pico <= limite,
             "la concurrencia observada ({pico}) superó el límite ({limite})"
         );
-        assert!(
-            pico >= 2,
-            "no se observó concurrencia real (pico = {pico})"
-        );
+        assert!(pico >= 2, "no se observó concurrencia real (pico = {pico})");
     }
 
     /// El `Debug` del cliente redacta el token.
     #[tokio::test]
-    async fn el_debug_del_cliente_redacta_el_token() {        let cliente = cliente_de_prueba();
+    async fn el_debug_del_cliente_redacta_el_token() {
+        let cliente = cliente_de_prueba();
         let texto = format!("{cliente:?}");
         assert!(
             !texto.contains("ghp_token_de_prueba"),
