@@ -18,6 +18,32 @@ Con `per_page=100`, `reto-python` devuelve 100 de sus 112 alertas. Cualquier rec
 
 El límite de 4096 bytes de Valet es de bytes, no de caracteres. Recortar por número de caracteres rompería emojis y acentos y produciría UTF-8 inválido. El recorte se hace por límite de bytes, avanzando hasta la última frontera de carácter válida, de modo que el `message` siempre sea UTF-8 válido y no supere 4096 bytes. El metadato sigue la misma disciplina contra su límite de 8192 bytes.
 
+## Hallazgos del mundo real (Fase 2)
+
+### La paginación es por cursor y cambia el prefijo de la ruta
+
+Medido sobre `GET /repos/atareao/reto-python/dependabot/alerts?state=open&per_page=100` (112 avisos en 2 páginas), el `Link` de la segunda página **no** es la misma ruta con `page=2`:
+
+```
+Link: <https://api.github.com/repositories/459293568/dependabot/alerts?state=open&per_page=100&after=Y3Vyc29yOnYyOpPPAAABjxPlouHLP_fn_1g6U7nPAAAAAUdOwhk%3D>; rel="next"
+```
+
+Cambia el prefijo (`/repos/{o}/{r}/...` → `/repositories/{id}/...`) y añade un cursor opaco `after=`. Por eso el cliente sigue la URL del `Link` **tal cual**, sin recomponerla: recomponer a partir de la ruta original pierde la página siguiente o entra en bucle. Esta es exactamente la trampa que `wiremock` no detectaba (un mock con `query_param` casa aunque sobren parámetros), así que el test de paginación se hizo con forma de cursor y con la página 2 montada **solo** bajo la ruta del cursor.
+
+### Un `403` puede significar «capacidad deshabilitada», no un fallo
+
+De 433 repositorios, 417 responden `200` a `dependabot/alerts` y 16 responden `403` con este cuerpo literal:
+
+```json
+{"message":"Dependabot alerts are disabled for this repository.","documentation_url":"https://docs.github.com/rest/dependabot/alerts#list-dependabot-alerts-for-a-repository","status":"403"}
+```
+
+El cliente lo clasifica como `GithubError::Disabled` (por el cuerpo, con `is_disabled_body`), distinto de un `403` de límite (`RateLimited`, que trae `Retry-After`) y de un `403` genérico (`Http{403}`). Sonda alternativa documentada para quien no quiera depender del texto: `GET /repos/{r}/vulnerability-alerts` responde `204` si los avisos están activados y `404` si están deshabilitados.
+
+### Cuota observada
+
+La respuesta real trae `X-Ratelimit-Limit: 5000`, `X-Ratelimit-Remaining: 4620` y `X-Ratelimit-Reset: 1793690335`. El cliente lee esas cabeceras y pausa de forma preventiva solo cuando `Remaining` cae por debajo del umbral; si no hay una lectura de `Remaining`, no pausa.
+
 ### Modelo de deriva
 
 La deriva clasifica cada alerta en una categoría cerrada: `new`, `still_open`, `resolved`, `reopened`, `severity_up`. `reopened` no es `new` porque la alerta ya existía y tiene `first_seen_run` previo: agruparla con las nuevas inflaría el recuento de novedades y ocultaría que algo ya corregido ha vuelto. La distinción permite que la notificación y el neto reflejen reaperturas sin contarlas como descubrimientos.
