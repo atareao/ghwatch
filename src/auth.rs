@@ -7,13 +7,26 @@
 //! 3. Si ninguna de las dos vías funciona, un error explicativo
 //!    ([`AuthError::NoCredentials`]).
 //!
-//! El token **nunca** se expone fuera del proceso: ni en mensajes de error, ni
-//! en logs, ni al formatear [`Token`] con `Debug` o `Display`, que lo redactan.
+//! El token **nunca** se incluye en mensajes de error ni en logs. Solo se
+//! expone a través de [`Token::expose_secret`], que es el único punto de fuga
+//! deliberado; al formatear [`Token`] con `Debug` o `Display` el valor se
+//! redacta.
 //!
-//! La lógica de decisión vive en [`resolve_token_from`], una función pura con
-//! el entorno y el runner de `gh` inyectados, lo que permite probarla sin tocar
-//! el entorno del proceso ni lanzar procesos externos. [`resolve_token`] es la
-//! envoltura fina que conecta esa lógica con las implementaciones reales.
+//! # Uso síncrono y asíncrono
+//!
+//! Existen dos envolturas sobre la misma lógica:
+//!
+//! - [`resolve_token`] usa `std::process::Command` (bloqueante). Es la vía para
+//!   el arranque del CLI, donde todavía no hay runtime de Tokio.
+//! - [`resolve_token_async`] usa `tokio::process::Command`. Es la vía para
+//!   código asíncrono (por ejemplo, el cliente `reqwest`), donde bloquear el
+//!   hilo del executor sería un problema.
+//!
+//! Ambas comparten la decisión (`token_from_env` / `token_from_gh`) y la
+//! interpretación de la salida ([`interpret_gh_exit`]). La lógica pura vive en
+//! [`resolve_token_from`], que recibe el entorno y el runner de `gh`
+//! inyectados, lo que permite probarla sin tocar el entorno del proceso ni
+//! lanzar procesos externos.
 
 use std::process::Command;
 
