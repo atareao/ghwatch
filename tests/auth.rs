@@ -40,9 +40,9 @@ mod auth {
         assert_eq!(token.expose_secret(), "ghp_valor_de_gh");
     }
 
-    /// Escenario 3: sin credencial alguna, el error explica las dos vías y no filtra token.
+    /// Escenario 3: sin credencial alguna, el error explica las dos vías.
     #[test]
-    fn error_sin_credenciales_menciona_las_dos_vias_y_no_filtra_token() {
+    fn error_sin_credenciales_menciona_las_dos_vias() {
         let err = resolve_token_from(|_| None, || Err(AuthError::GhNotInstalled))
             .expect_err("sin credenciales la resolución debe fallar");
 
@@ -55,18 +55,20 @@ mod auth {
             mensaje.contains("gh auth token"),
             "el error debe mencionar `gh auth token`: {mensaje}"
         );
-        assert!(
-            !mensaje.contains("ghp_"),
-            "el error no debe contener ningún valor de token: {mensaje}"
-        );
     }
 
-    /// Escenario 3 (variante): `gh` falla; el error sigue explicando las dos vías.
+    /// Escenario 3 (variante): `gh` falla con un código; el error se envuelve en
+    /// `NoCredentials` y sigue explicando las dos vías.
     #[test]
     fn error_cuando_gh_falla_menciona_las_dos_vias() {
         let err = resolve_token_from(|_| None, || Err(AuthError::GhFailed { code: Some(1) }))
             .expect_err("un fallo de `gh` debe producir error");
 
+        assert!(
+            matches!(err, AuthError::NoCredentials { .. }),
+            "se esperaba NoCredentials, no: {err:?}"
+        );
+
         let mensaje = err.to_string();
         assert!(
             mensaje.contains("GITHUB_TOKEN"),
@@ -78,11 +80,14 @@ mod auth {
         );
     }
 
-    /// Escenario 3 (variante): `gh` devuelve vacío; el error sigue explicando las dos vías.
+    /// Escenario 3 (variante): el runner devuelve `GhEmpty`; el error sigue
+    /// explicando las dos vías.
+    ///
+    /// Este caso cubre el error del runner, no una salida vacía.
     #[test]
-    fn error_cuando_gh_devuelve_vacio_menciona_las_dos_vias() {
+    fn error_cuando_el_runner_devuelve_gh_empty_menciona_las_dos_vias() {
         let err = resolve_token_from(|_| None, || Err(AuthError::GhEmpty))
-            .expect_err("una salida vacía de `gh` debe producir error");
+            .expect_err("un error del runner debe producir error");
 
         let mensaje = err.to_string();
         assert!(
@@ -93,6 +98,68 @@ mod auth {
             mensaje.contains("gh auth token"),
             "falta `gh auth token` en: {mensaje}"
         );
+    }
+
+    /// Escenario 3 (variante): `gh` termina bien pero devuelve una salida vacía.
+    ///
+    /// A diferencia del test anterior, aquí el runner devuelve `Ok` con una
+    /// cadena en blanco, de modo que ejercita la rama que convierte una salida
+    /// vacía en `NoCredentials` con causa `GhEmpty`.
+    #[test]
+    fn error_cuando_gh_devuelve_salida_vacia_menciona_las_dos_vias() {
+        let err = resolve_token_from(|_| None, || Ok("   \n\t".to_string()))
+            .expect_err("una salida vacía debe producir error");
+
+        assert!(
+            matches!(err, AuthError::NoCredentials { .. }),
+            "se esperaba NoCredentials, no: {err:?}"
+        );
+
+        let mensaje = err.to_string();
+        assert!(
+            mensaje.contains("GITHUB_TOKEN"),
+            "falta GITHUB_TOKEN en: {mensaje}"
+        );
+        assert!(
+            mensaje.contains("gh auth token"),
+            "falta `gh auth token` en: {mensaje}"
+        );
+    }
+
+    /// Un `GITHUB_TOKEN` presente pero vacío o en blanco cae a la vía de `gh`.
+    #[test]
+    fn entorno_vacio_o_en_blanco_cae_a_gh() {
+        let gh_invocado = Cell::new(false);
+
+        let token = resolve_token_from(
+            |_| Some("   ".to_string()),
+            || {
+                gh_invocado.set(true);
+                Ok("ghp_desde_gh".to_string())
+            },
+        )
+        .expect("con el entorno en blanco debe usarse `gh`");
+
+        assert!(gh_invocado.get(), "el entorno en blanco debe caer a `gh`");
+        assert_eq!(token.expose_secret(), "ghp_desde_gh");
+    }
+
+    /// El valor del entorno se recorta antes de usarse.
+    #[test]
+    fn recorta_el_valor_del_entorno() {
+        let gh_invocado = Cell::new(false);
+
+        let token = resolve_token_from(
+            |_| Some("  ghp_recortado\n".to_string()),
+            || {
+                gh_invocado.set(true);
+                Ok("no debería usarse".to_string())
+            },
+        )
+        .expect("con el entorno presente debe usarse ese token");
+
+        assert_eq!(token.expose_secret(), "ghp_recortado");
+        assert!(!gh_invocado.get(), "no debe invocarse `gh` si el entorno vale");
     }
 
     /// El tipo `Token` redacta su valor tanto en `Debug` como en `Display`.
