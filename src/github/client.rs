@@ -278,8 +278,13 @@ impl GithubClient {
         Ok(elementos)
     }
 
-    /// Devuelve el semáforo que acota la concurrencia, para orquestar barridos
-    /// de varias colecciones.
+    /// Devuelve el semáforo que acota la concurrencia.
+    ///
+    /// El semáforo **solo** se aplica de forma automática dentro de
+    /// [`GithubClient::for_each_concurrent`]. Quien lance peticiones por su
+    /// cuenta (por ejemplo, llamadas sueltas a [`GithubClient::get_json`] desde
+    /// varias tareas) debe adquirir un permiso de este semáforo antes de cada
+    /// petición, o el límite de concurrencia no se respetará.
     #[must_use]
     pub fn limiter(&self) -> Arc<Semaphore> {
         Arc::clone(&self.limiter)
@@ -591,10 +596,63 @@ mod tests {
         assert!(salidas[2].is_ok(), "la tarea 3 debería completarse");
     }
 
+    /// El semáforo acota de verdad la concurrencia: el número máximo de tareas
+    /// solapadas (pico) no supera el límite configurado y, además, llega a
+    /// superar uno (si no, el test no probaría nada).
+    ///
+    /// No depende de temporizadores: las tareas ceden el control
+    /// (`yield_now`) mientras mantienen su permiso, de modo que el solape es
+    /// determinista.
+    #[tokio::test]
+    async fn for_each_concurrent_acota_la_concurrencia_observada() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let cliente = cliente_de_prueba();
+        let limite = cliente.config.concurrency;
+        let en_curso = Arc::new(AtomicUsize::new(0));
+        let pico = Arc::new(AtomicUsize::new(0));
+
+        let items: Vec<u32> = (0..40).collect();
+        let salidas = cliente
+            .for_each_concurrent(items, {
+                let en_curso = Arc::clone(&en_curso);
+                let pico = Arc::clone(&pico);
+                move |numero| {
+                    let en_curso = Arc::clone(&en_curso);
+                    let pico = Arc::clone(&pico);
+                    async move {
+                        let actual = en_curso.fetch_add(1, Ordering::SeqCst) + 1;
+                        pico.fetch_max(actual, Ordering::SeqCst);
+                        for _ in 0..64 {
+                            tokio::task::yield_now().await;
+                        }
+                        en_curso.fetch_sub(1, Ordering::SeqCst);
+                        numero
+                    }
+                }
+            })
+            .await;
+
+        assert_eq!(salidas.len(), 40);
+        assert!(
+            salidas.iter().all(Result::is_ok),
+            "ninguna tarea debería fallar"
+        );
+
+        let pico = pico.load(Ordering::SeqCst);
+        assert!(
+            pico <= limite,
+            "la concurrencia observada ({pico}) superó el límite ({limite})"
+        );
+        assert!(
+            pico >= 2,
+            "no se observó concurrencia real (pico = {pico})"
+        );
+    }
+
     /// El `Debug` del cliente redacta el token.
     #[tokio::test]
-    async fn el_debug_del_cliente_redacta_el_token() {
-        let cliente = cliente_de_prueba();
+    async fn el_debug_del_cliente_redacta_el_token() {        let cliente = cliente_de_prueba();
         let texto = format!("{cliente:?}");
         assert!(
             !texto.contains("ghp_token_de_prueba"),
