@@ -92,6 +92,14 @@ pub enum AuthError {
     #[error("`gh auth token` no devolvió ninguna credencial")]
     GhEmpty,
 
+    /// `gh auth token` devolvió bytes que no son UTF-8 válido.
+    ///
+    /// Se trata como error en lugar de sustituir los bytes inválidos por el
+    /// carácter de reemplazo (U+FFFD), que produciría un token corrupto sin
+    /// avisar.
+    #[error("`gh auth token` devolvió una salida que no es UTF-8 válido")]
+    GhOutputNotUtf8,
+
     /// No fue posible obtener una credencial por ninguna de las dos vías.
     ///
     /// El mensaje detalla ambas alternativas (`GITHUB_TOKEN` y `gh auth token`)
@@ -164,6 +172,42 @@ pub fn resolve_token() -> Result<Token, AuthError> {
     resolve_token_from(|clave| std::env::var(clave).ok(), run_gh_auth_token)
 }
 
+/// Interpreta el resultado de ejecutar `gh auth token`.
+///
+/// Es una función **pura**: no lanza procesos ni toca el entorno. Recibe el
+/// código de salida y la salida estándar ya capturados y decide si hay
+/// credencial o qué error devolver. Concentrar aquí la interpretación permite
+/// probar todas las ramas sin IO.
+///
+/// El caso «`gh` no está instalado» **no** pasa por aquí: solo puede detectarse
+/// durante el intento de lanzar el proceso (IO), así que lo resuelve el runner
+/// al observar [`std::io::ErrorKind::NotFound`].
+///
+/// # Errores
+///
+/// - [`AuthError::GhFailed`] si el código de salida no es `Some(0)`.
+/// - [`AuthError::GhOutputNotUtf8`] si la salida no es UTF-8 válido.
+/// - [`AuthError::GhEmpty`] si la salida, una vez recortada, está vacía.
+///
+/// No se incluye la salida de `gh` en ningún error: así el mensaje jamás puede
+/// contener el token.
+fn interpret_gh_exit(code: Option<i32>, stdout: &[u8]) -> Result<String, AuthError> {
+    if code != Some(0) {
+        return Err(AuthError::GhFailed { code });
+    }
+
+    // Conversión estricta: unos bytes no UTF-8 son un error, no un token
+    // silenciosamente corrompido.
+    let texto = String::from_utf8(stdout.to_vec()).map_err(|_| AuthError::GhOutputNotUtf8)?;
+
+    let texto = texto.trim();
+    if texto.is_empty() {
+        return Err(AuthError::GhEmpty);
+    }
+
+    Ok(texto.to_string())
+}
+
 /// Ejecuta `gh auth token` y devuelve su salida estándar.
 ///
 /// # Errores
@@ -172,9 +216,10 @@ pub fn resolve_token() -> Result<Token, AuthError> {
 /// - [`AuthError::GhFailed`] si no se pudo lanzar el proceso o si `gh` terminó
 ///   con un código distinto de cero.
 /// - [`AuthError::GhEmpty`] si `gh` terminó bien pero sin salida.
+/// - [`AuthError::GhOutputNotUtf8`] si la salida no es UTF-8 válido.
 ///
-/// Deliberadamente no se incluye la salida de `gh` en el error: así el mensaje
-/// jamás puede contener el token.
+/// La decisión a partir del resultado del proceso la toma
+/// [`interpret_gh_exit`]; aquí solo queda el IO (lanzar y capturar).
 fn run_gh_auth_token() -> Result<String, AuthError> {
     let salida = match Command::new("gh").args(["auth", "token"]).output() {
         Ok(salida) => salida,
@@ -184,15 +229,54 @@ fn run_gh_auth_token() -> Result<String, AuthError> {
         Err(_) => return Err(AuthError::GhFailed { code: None }),
     };
 
-    if !salida.status.success() {
-        return Err(AuthError::GhFailed {
-            code: salida.status.code(),
-        });
+    interpret_gh_exit(salida.status.code(), &salida.stdout)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- interpret_gh_exit: interpretación pura de la salida de `gh` ---
+
+    /// Un código `Some(0)` con salida válida devuelve el token ya recortado.
+    #[test]
+    fn interpret_gh_exit_exito_devuelve_token_recortado() {
+        let token = interpret_gh_exit(Some(0), b"ghp_abc123\n").expect("salida válida");
+        assert_eq!(token, "ghp_abc123");
     }
 
-    if String::from_utf8_lossy(&salida.stdout).trim().is_empty() {
-        return Err(AuthError::GhEmpty);
+    /// Un código distinto de cero produce `GhFailed` conservando el código.
+    #[test]
+    fn interpret_gh_exit_codigo_distinto_de_cero_devuelve_gh_failed() {
+        let err = interpret_gh_exit(Some(1), b"").expect_err("código 1 debe fallar");
+        assert!(matches!(err, AuthError::GhFailed { code: Some(1) }));
     }
 
-    Ok(String::from_utf8_lossy(&salida.stdout).into_owned())
+    /// Un código ausente (proceso terminado por señal) produce `GhFailed`.
+    #[test]
+    fn interpret_gh_exit_codigo_ausente_devuelve_gh_failed() {
+        let err = interpret_gh_exit(None, b"").expect_err("código ausente debe fallar");
+        assert!(matches!(err, AuthError::GhFailed { code: None }));
+    }
+
+    /// Salida vacía con éxito produce `GhEmpty`.
+    #[test]
+    fn interpret_gh_exit_vacio_devuelve_gh_empty() {
+        let err = interpret_gh_exit(Some(0), b"").expect_err("salida vacía debe fallar");
+        assert!(matches!(err, AuthError::GhEmpty));
+    }
+
+    /// Salida compuesta solo de espacios produce `GhEmpty`.
+    #[test]
+    fn interpret_gh_exit_solo_espacios_devuelve_gh_empty() {
+        let err = interpret_gh_exit(Some(0), b"  \n\t ").expect_err("solo espacios debe fallar");
+        assert!(matches!(err, AuthError::GhEmpty));
+    }
+
+    /// Bytes no UTF-8 producen `GhOutputNotUtf8` en lugar de corromper el token.
+    #[test]
+    fn interpret_gh_exit_no_utf8_devuelve_gh_output_not_utf8() {
+        let err = interpret_gh_exit(Some(0), &[0xff, 0xfe, 0x00]).expect_err("no UTF-8 debe fallar");
+        assert!(matches!(err, AuthError::GhOutputNotUtf8));
+    }
 }
