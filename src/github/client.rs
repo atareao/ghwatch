@@ -18,6 +18,7 @@
 //! El tiempo no se duerme directamente: se delega en un [`Sleeper`] inyectable,
 //! de modo que los tests pueden comprobar las esperas solicitadas sin esperar.
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -44,6 +45,13 @@ pub const DEFAULT_USER_AGENT: &str = "ghwatch";
 
 /// Concurrencia por defecto al recorrer colecciones de recursos.
 pub const DEFAULT_CONCURRENCY: usize = 6;
+
+/// Número máximo de páginas por colección antes de abortar por seguridad.
+///
+/// Acota un `Link` mal formado o cíclico: 1000 páginas × 100 elementos cubren
+/// de sobra cualquier repositorio real (Dependabot no llega a ese orden de
+/// magnitud), así que agotarlo indica un bucle, no un caso legítimo.
+pub const DEFAULT_MAX_PAGES: usize = 1000;
 
 /// Media type exigido por la API de GitHub.
 const ACCEPT_JSON: &str = "application/vnd.github+json";
@@ -105,6 +113,11 @@ pub struct GithubConfig {
     pub user_agent: String,
     /// Máximo de peticiones simultáneas.
     pub concurrency: usize,
+    /// Número máximo de páginas que se recorren en una colección paginada.
+    ///
+    /// Corta un `Link` mal formado o cíclico con
+    /// [`GithubError::PaginationLimit`] en lugar de colgar el escaneo.
+    pub max_pages: usize,
 }
 
 impl Default for GithubConfig {
@@ -117,6 +130,7 @@ impl Default for GithubConfig {
             timeout: Duration::from_secs(30),
             user_agent: DEFAULT_USER_AGENT.to_string(),
             concurrency: DEFAULT_CONCURRENCY,
+            max_pages: DEFAULT_MAX_PAGES,
         }
     }
 }
@@ -211,18 +225,37 @@ impl GithubClient {
     /// `next` hasta agotar las páginas: nunca trunca el resultado al tamaño de
     /// la primera página.
     ///
+    /// La paginación de GitHub es por **cursor**: el `Link` puede cambiar el
+    /// prefijo de la ruta (por ejemplo, de `/repos/{o}/{r}/dependabot/alerts` a
+    /// `/repositories/{id}/dependabot/alerts`) y arrastrar un `after=`. Por eso
+    /// se sigue la URL del `Link` **tal cual**, sin recomponerla.
+    ///
+    /// Por seguridad, se aborta con [`GithubError::PaginationLimit`] si se
+    /// supera [`GithubConfig::max_pages`] o si el servidor vuelve a ofrecer una
+    /// URL ya visitada.
+    ///
     /// # Errores
     ///
-    /// Los mismos que [`GithubClient::get_json`], aplicados a cualquier página.
+    /// Los mismos que [`GithubClient::get_json`], aplicados a cualquier página,
+    /// más [`GithubError::PaginationLimit`] si la cadena de `Link` no es finita.
     pub async fn get_paginated<T: DeserializeOwned>(
         &self,
         path: &str,
     ) -> Result<Vec<T>, GithubError> {
         let mut url = self.absolute_url(&with_per_page(path, self.config.per_page));
         let mut elementos: Vec<T> = Vec::new();
+        let mut visitadas: HashSet<String> = HashSet::new();
+        let mut paginas: usize = 0;
 
         loop {
+            if paginas >= self.config.max_pages {
+                return Err(GithubError::PaginationLimit { pages: paginas });
+            }
+
             let response = self.send_with_retries(&url).await?;
+            visitadas.insert(url.clone());
+            paginas += 1;
+
             let siguiente = next_link(header_str(&response, HEADER_LINK).as_deref());
 
             let pagina: Vec<T> = response
@@ -232,7 +265,12 @@ impl GithubClient {
             elementos.extend(pagina);
 
             match siguiente {
-                Some(siguiente) => url = siguiente,
+                Some(siguiente) => {
+                    if visitadas.contains(&siguiente) {
+                        return Err(GithubError::PaginationLimit { pages: paginas });
+                    }
+                    url = siguiente;
+                }
                 None => break,
             }
         }

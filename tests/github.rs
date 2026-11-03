@@ -466,6 +466,122 @@ mod github {
         }
     }
 
+    // --- S2: corte de seguridad de la paginación ---
+
+    /// Si el servidor repite el mismo `Link`, la paginación aborta con un error
+    /// acotado en lugar de entrar en un bucle infinito.
+    #[tokio::test]
+    async fn paginacion_con_link_repetido_aborta_sin_colgar() {
+        let server = MockServer::start().await;
+        let repetido = format!("<{}/items?per_page=100>; rel=\"next\"", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/items"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("Link", repetido.as_str())
+                    .set_body_json(serde_json::json!([{ "id": 1 }])),
+            )
+            .mount(&server)
+            .await;
+
+        let (client, _sleeper) = cliente(&server);
+        let err = client
+            .get_paginated::<Item>("/items")
+            .await
+            .expect_err("un `Link` repetido debe abortar");
+
+        assert!(
+            matches!(err, GithubError::PaginationLimit { .. }),
+            "se esperaba PaginationLimit, no: {err:?}"
+        );
+        assert_eq!(
+            server
+                .received_requests()
+                .await
+                .expect("peticiones recibidas")
+                .len(),
+            1,
+            "no debe repetirse la petición a la misma URL"
+        );
+    }
+
+    /// `max_pages` acota el número de páginas: al alcanzarlo, error acotado en
+    /// lugar de seguir pidiendo.
+    #[tokio::test]
+    async fn paginacion_respeta_max_pages() {
+        let server = MockServer::start().await;
+        let p2 = format!("<{}/items?after=2>; rel=\"next\"", server.uri());
+        let p3 = format!("<{}/items?after=3>; rel=\"next\"", server.uri());
+        let p4 = format!("<{}/items?after=4>; rel=\"next\"", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/items"))
+            .and(query_param_is_missing("after"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("Link", p2.as_str())
+                    .set_body_json(serde_json::json!([{ "id": 1 }])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/items"))
+            .and(query_param("after", "2"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("Link", p3.as_str())
+                    .set_body_json(serde_json::json!([{ "id": 2 }])),
+            )
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/items"))
+            .and(query_param("after", "3"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("Link", p4.as_str())
+                    .set_body_json(serde_json::json!([{ "id": 3 }])),
+            )
+            .mount(&server)
+            .await;
+
+        let config = GithubConfig {
+            base_url: server.uri(),
+            max_pages: 2,
+            ..GithubConfig::default()
+        };
+        let sleeper = Arc::new(RecordingSleeper::new());
+        let client = GithubClient::with_sleeper(
+            Token::new("ghp_token_de_prueba").expect("token válido"),
+            config,
+            Arc::clone(&sleeper) as Arc<dyn Sleeper>,
+        )
+        .expect("el cliente debería construirse");
+
+        let err = client
+            .get_paginated::<Item>("/items")
+            .await
+            .expect_err("superar `max_pages` debe abortar");
+
+        assert!(
+            matches!(err, GithubError::PaginationLimit { pages } if pages == 2),
+            "se esperaba PaginationLimit con 2 páginas, no: {err:?}"
+        );
+        assert_eq!(
+            server
+                .received_requests()
+                .await
+                .expect("peticiones recibidas")
+                .len(),
+            2,
+            "no debe pedirse una página más allá del máximo"
+        );
+    }
+
     // --- 2.6 Pausa preventiva por cuota baja ---
     /// Con `X-RateLimit-Remaining` por debajo del umbral, antes de la siguiente
     /// petición se solicita al dormidor una espera coherente con `Reset`.

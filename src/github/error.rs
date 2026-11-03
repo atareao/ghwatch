@@ -76,6 +76,17 @@ pub enum GithubError {
         body: String,
     },
 
+    /// La paginación por `Link` no termina de forma sana.
+    ///
+    /// Se emite al superar [`crate::github::GithubConfig::max_pages`] o cuando
+    /// el servidor vuelve a ofrecer una URL ya visitada (bucle). Evita que un
+    /// `Link` mal formado o cíclico cuelgue el escaneo.
+    #[error("la paginación por `Link` no es finita (posible bucle): {pages} páginas recorridas")]
+    PaginationLimit {
+        /// Páginas recorridas antes de abortar.
+        pages: usize,
+    },
+
     /// Error de red, de transporte o de decodificación del cuerpo.
     ///
     /// El mensaje procede de `reqwest` e incluye la URL, nunca las cabeceras:
@@ -96,6 +107,12 @@ impl GithubError {
     #[must_use]
     pub fn is_disabled(&self) -> bool {
         matches!(self, Self::Disabled)
+    }
+
+    /// Indica si el error es el corte de seguridad de la paginación.
+    #[must_use]
+    pub fn is_pagination_limit(&self) -> bool {
+        matches!(self, Self::PaginationLimit { .. })
     }
 }
 
@@ -317,5 +334,12 @@ mod tests {
     fn is_rate_limited_solo_para_los_limites() {
         assert!(GithubError::RateLimited { retry_after: None }.is_rate_limited());
         assert!(!GithubError::Unauthorized.is_rate_limited());
+    }
+
+    /// `is_pagination_limit` distingue el corte de seguridad de la paginación.
+    #[test]
+    fn is_pagination_limit_solo_para_el_corte() {
+        assert!(GithubError::PaginationLimit { pages: 1000 }.is_pagination_limit());
+        assert!(!GithubError::NotFound.is_pagination_limit());
     }
 }
