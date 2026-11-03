@@ -4,31 +4,56 @@
 
 ## 0. Aprobación (punto de parada del protocolo)
 
-- [ ] 0.1 Presentar este change (proposal + specs + design + tasks) y esperar aprobación explícita antes de tocar código.
+- [x] 0.1 Presentar este change (proposal + specs + design + tasks) y esperar aprobación explícita antes de tocar código.
 
 **Punto de parada obligatorio.** Ninguna casilla de las fases 1 a 6 ni de la fase 7 se marca hasta que exista una aprobación explícita del usuario sobre el conjunto proposal + specs + design + tasks. Sin esa aprobación no se crea el repositorio, ni se añaden dependencias, ni se escriben tests ni código. Marcar cualquier casilla posterior sin esta aprobación invalida el change.
 
 ## 1. Andamiaje y autenticación
 
-- [ ] 1.1 GREEN — `cargo init --name ghwatch` con Rust edition 2024; confirmar con `cargo check`.
-- [ ] 1.2 GREEN — declarar dependencias (tokio, clap derive, reqwest con rustls, serde/serde_json, sqlx sqlite runtime-tokio, chrono, anyhow, thiserror, tracing, indicatif, comfy-table) y `wiremock` como dev-dependency; confirmar con `cargo check`.
-- [ ] 1.3 GREEN — añadir `[lints.clippy] all = "deny"` y `rustfmt.toml`; confirmar con `cargo clippy -- -D warnings` y `cargo fmt --check`.
-- [ ] 1.4 RED — escribir el test de `auth::resolve_token` con `GITHUB_TOKEN` presente que debe fallar porque el módulo `auth` no existe; comando `cargo test auth`; pegar la salida en rojo.
-- [ ] 1.5 RED — escribir el test con `GITHUB_TOKEN` ausente y `gh` simulado que debe fallar porque no hay resolución por `gh auth token`; comando `cargo test auth`; pegar la salida en rojo.
-- [ ] 1.6 RED — escribir el test sin credenciales que espera un error tipado que menciona las dos vías y no contiene valor de token; comando `cargo test auth`; pegar la salida en rojo.
-- [ ] 1.7 GREEN — implementar el módulo `auth` con el orden `GITHUB_TOKEN` → `gh auth token` → error tipado, sin registrar el token; confirmar con `cargo test auth` y `cargo check`.
-- [ ] 1.8 Auditoría con `@rust-reviewer` del andamiaje y del módulo `auth`.
+- [x] 1.1 GREEN — `cargo init --name ghwatch` con Rust edition 2024; confirmar con `cargo check`.
+- [x] 1.2 GREEN — declarar dependencias (tokio, clap derive, reqwest con rustls, serde/serde_json, sqlx sqlite runtime-tokio, chrono, anyhow, thiserror, tracing, indicatif, comfy-table) y `wiremock` como dev-dependency; confirmar con `cargo check`.
+- [x] 1.3 GREEN — añadir `[lints.clippy] all = "deny"` y `rustfmt.toml`; confirmar con `cargo clippy -- -D warnings` y `cargo fmt --check`.
+- [x] 1.4 RED — escribir el test de `auth::resolve_token` con `GITHUB_TOKEN` presente que debe fallar porque el módulo `auth` no existe; comando `cargo test auth`; pegar la salida en rojo.
+- [x] 1.5 RED — escribir el test con `GITHUB_TOKEN` ausente y `gh` simulado que debe fallar porque no hay resolución por `gh auth token`; comando `cargo test auth`; pegar la salida en rojo.
+- [x] 1.6 RED — escribir el test sin credenciales que espera un error tipado que menciona las dos vías y no contiene valor de token; comando `cargo test auth`; pegar la salida en rojo.
+- [x] 1.7 GREEN — implementar el módulo `auth` con el orden `GITHUB_TOKEN` → `gh auth token` → error tipado, sin registrar el token; confirmar con `cargo test auth` y `cargo check`.
+- [x] 1.8 Auditoría con `@rust-reviewer` del andamiaje y del módulo `auth`.
+
+### 1.9 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la Fase 1 (veredicto: aprobado con reservas, cero bloqueantes). Todos aplicados con TDD (rojo → verde).
+
+- [x] 1.9.1 Punto 1 — sustituir la aserción anti-fuga tautológica por un test real (estructura local `Envoltorio` con `Debug` que contiene un `Token`; comprobar que el `Debug` de la estructura y el `Debug`/`Display` del error no filtran el secreto). Verificación: `cargo test auth`.
+- [x] 1.9.2 Punto 2 — extraer la interpretación de la salida de `gh` a la función pura `interpret_gh_exit(code, stdout)` y cubrir sus ramas (éxito, código≠0, código ausente, vacío, solo espacios, no-UTF-8). Verificación: `cargo test auth`.
+- [x] 1.9.3 Punto 3 — corregir la cobertura fantasma: test real con salida vacía (`Ok("   ")`), renombrar el caso que inyectaba `Err(GhEmpty)`, y cubrir el fallthrough de `GITHUB_TOKEN` vacío/en blanco y el recorte del entorno. Verificación: `cargo test auth`.
+- [x] 1.9.4 Punto 4 — sustituir `String::from_utf8_lossy` por conversión estricta `String::from_utf8` con la nueva variante `AuthError::GhOutputNotUtf8`. Verificación: `cargo test auth`.
+- [x] 1.9.5 Punto 5 — añadir la vía asíncrona `resolve_token_async()` con `tokio::process::Command` y su núcleo `resolve_from_async`, compartiendo la lógica de decisión y la interpretación con la vía síncrona. Verificación: `cargo test auth`.
+- [x] 1.9.6 Punto 6 — endurecer `Token` con `Token::new()` (rechaza vacío/solo espacios, `AuthError::EmptyToken`) y eliminar los `impl From<String>`/`From<&str>` públicos. Verificación: `cargo test auth`.
+- [x] 1.9.7 Punto 7 — `impl FnOnce` en `resolve_token_from`, comentario sobre `VarError::NotUnicode` y reescritura del doc de módulo (exposición solo vía `expose_secret` y uso síncrono/asíncrono). Verificación: `cargo test`, `cargo clippy --all-targets -- -D warnings` y `cargo fmt --all --check`.
 
 ## 2. Cliente GitHub
 
-- [ ] 2.1 RED — escribir el test con `wiremock` de una colección de 2 páginas servida por `Link` que debe fallar porque no hay paginación; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.2 RED — escribir el test con `wiremock` que verifica las cabeceras `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28` y `User-Agent: ghwatch`; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.3 RED — escribir el test con `wiremock` de `401` que espera error tipado de autenticación; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.4 RED — escribir el test con `wiremock` de `403` con `Retry-After: 30` que espera espera y reintento, y error tipado al superar el máximo; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.5 RED — escribir el test con `wiremock` de `404` `no analysis found` que espera resultado «no configurado» en lugar de error; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.6 RED — escribir el test con `wiremock` de `X-RateLimit-Remaining` por debajo del umbral que debe fallar porque no hay pausa preventiva; comando `cargo test github`; pegar la salida en rojo.
-- [ ] 2.7 GREEN — implementar el cliente GitHub con cabeceras, paginación por `Link`, control de rate limit, reintentos con `Retry-After` y concurrencia acotada; confirmar con `cargo test github` y `cargo check`.
-- [ ] 2.8 Auditoría con `@rust-reviewer` del cliente GitHub.
+- [x] 2.1 RED — escribir el test con `wiremock` de una colección de 2 páginas servida por `Link` que debe fallar porque no hay paginación; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.2 RED — escribir el test con `wiremock` que verifica las cabeceras `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28` y `User-Agent: ghwatch`; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.3 RED — escribir el test con `wiremock` de `401` que espera error tipado de autenticación; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.4 RED — escribir el test con `wiremock` de `403` con `Retry-After: 30` que espera espera y reintento, y error tipado al superar el máximo; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.5 RED — escribir el test con `wiremock` de `404` `no analysis found` que espera resultado «no configurado» en lugar de error; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.6 RED — escribir el test con `wiremock` de `X-RateLimit-Remaining` por debajo del umbral que debe fallar porque no hay pausa preventiva; comando `cargo test github`; pegar la salida en rojo.
+- [x] 2.7 GREEN — implementar el cliente GitHub con cabeceras, paginación por `Link`, control de rate limit, reintentos con `Retry-After` y concurrencia acotada; confirmar con `cargo test github` y `cargo check`.
+- [x] 2.8 Auditoría con `@rust-reviewer` del cliente GitHub.
+
+### 2.9 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la Fase 2 (el cliente HTTP). Un bloqueante (B1) y los hallazgos S1–S6 y S9, todos aplicados con TDD (rojo → verde).
+
+- [x] 2.9.1 B1 (bloqueante) — el test de paginación pasa a usar un `Link` con **forma real de cursor** (otro prefijo de ruta y `after=`), y comprueba que la segunda petición va **exactamente** a la URL del `Link`. Demostrado discriminante: recomponer la URL en lugar de seguir el `Link` crudo hace fallar el test (404 acotado). La página 1 se sirve con `up_to_n_times(1)` para que la recomposición falle en vez de colgarse. Verificación: `cargo test github::paginacion_sigue`.
+- [x] 2.9.2 S1 — nueva variante `GithubError::Disabled`, clasificada por el cuerpo real mediante la función pura `is_disabled_body`: un `403` con el literal de Dependabot deshabilitado es `Disabled`; un `403` con otro cuerpo sigue siendo `Http{403}`; un `403` con `Retry-After` sigue siendo `RateLimited` (el límite manda). Verificación: `cargo test github::error`, `cargo test github`.
+- [x] 2.9.3 S2 — nuevo campo `GithubConfig::max_pages` (por defecto 1000) y detección de URL repetida (`HashSet` de visitadas); ambos abortan con `GithubError::PaginationLimit` en lugar de colgar el escaneo. Verificación: `cargo test github::paginacion`.
+- [x] 2.9.4 S3 — la clasificación solo acepta `2xx` como éxito: un `3xx` (incluido `304`) se devuelve como `Http{status}` en lugar de intentar decodificar un cuerpo que no es el JSON esperado. Verificación: `cargo test github::error`.
+- [x] 2.9.5 S4 — `for_each_concurrent` cambia de firma a `Vec<Result<O, JoinError>>`: los fallos de runtime de una tarea ya no se descartan, se devuelven en su posición (el `Id` de la tarea se guarda al lanzarla para mapear el error a su índice). Verificación: `cargo test github::for_each_concurrent`.
+- [x] 2.9.6 S5 — test de concurrencia no frágil (sin temporizadores): con un pico medido con `AtomicUsize` y `yield_now`, se comprueba que la concurrencia observada no supera el límite y llega a superar uno; demostrado discriminante (quitar el permiso del semáforo → pico 40 > 6 → rojo). Se documenta que el semáforo solo actúa vía `for_each_concurrent` y que quien lance peticiones por su cuenta debe usar `limiter()`. Verificación: `cargo test github::for_each_concurrent`.
+- [x] 2.9.7 S6 — se documenta y se testea que la espera conservadora (`FALLBACK_PAUSE`) solo se aplica cuando consta una lectura de `Remaining` por debajo del umbral: sin `Remaining` legible no se pausa aunque haya `Reset`. Verificación: `cargo test github::ratelimit`.
+- [x] 2.9.8 S9 — `with_per_page` analiza la consulta como pares `clave=valor`, de modo que no da falso positivo con `otro=per_page=3` ni con `not_per_page=1`. Verificación: `cargo test github::with_per_page`.
 
 ## 3. Inventario y recolección
 
