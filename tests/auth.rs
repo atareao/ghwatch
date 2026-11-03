@@ -25,3 +25,12 @@ fn usa_github_token_del_entorno_sin_invocar_gh() {
     assert_eq!(token.expose_secret(), "ghp_valor_del_entorno");
     assert!(!gh_invocado.get(), "no se debe invocar `gh` si GITHUB_TOKEN existe");
 }
+
+/// Escenario 2: sin `GITHUB_TOKEN`, se obtiene el token de `gh auth token`.
+#[test]
+fn obtiene_token_de_gh_cuando_no_hay_entorno() {
+    let token = resolve_token_from(|_| None, || Ok("ghp_valor_de_gh".to_string()))
+        .expect("la resolución debería tener éxito con `gh` disponible");
+
+    assert_eq!(token.expose_secret(), "ghp_valor_de_gh");
+}
