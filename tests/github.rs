@@ -411,8 +411,62 @@ mod github {
         );
     }
 
-    // --- 2.6 Pausa preventiva por cuota baja ---
+    /// Un `403` con el cuerpo literal de Dependabot deshabilitado se traduce a
+    /// `Disabled` (capacidad deshabilitada), no a un `Http` genérico.
+    #[tokio::test]
+    async fn respuesta_403_con_cuerpo_deshabilitado_es_disabled() {
+        let server = MockServer::start().await;
 
+        Mock::given(method("GET"))
+            .and(path("/repos/atareao/gitignore/dependabot/alerts"))
+            .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                "message": "Dependabot alerts are disabled for this repository.",
+                "documentation_url": "https://docs.github.com/rest/dependabot/alerts#list-dependabot-alerts-for-a-repository",
+                "status": "403"
+            })))
+            .mount(&server)
+            .await;
+
+        let (client, _sleeper) = cliente(&server);
+        let err = client
+            .get_json::<serde_json::Value>("/repos/atareao/gitignore/dependabot/alerts")
+            .await
+            .expect_err("un 403 debe producir error");
+
+        assert!(
+            matches!(err, GithubError::Disabled),
+            "se esperaba Disabled, no: {err:?}"
+        );
+    }
+
+    /// Un `403` con otro cuerpo no es «deshabilitado»: es un `Http` con estado
+    /// 403.
+    #[tokio::test]
+    async fn respuesta_403_con_otro_cuerpo_es_http() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/acme/demo/otra-cosa"))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .set_body_json(serde_json::json!({ "message": "Resource not accessible" })),
+            )
+            .mount(&server)
+            .await;
+
+        let (client, _sleeper) = cliente(&server);
+        let err = client
+            .get_json::<serde_json::Value>("/repos/acme/demo/otra-cosa")
+            .await
+            .expect_err("un 403 debe producir error");
+
+        match err {
+            GithubError::Http { status, .. } => assert_eq!(status, 403),
+            otro => panic!("se esperaba Http, no: {otro:?}"),
+        }
+    }
+
+    // --- 2.6 Pausa preventiva por cuota baja ---
     /// Con `X-RateLimit-Remaining` por debajo del umbral, antes de la siguiente
     /// petición se solicita al dormidor una espera coherente con `Reset`.
     #[tokio::test]

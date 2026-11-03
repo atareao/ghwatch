@@ -9,9 +9,18 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-/// Marca que la API de GitHub devuelve en el cuerpo de un `404` cuando la
+/// Marca que GitHub devuelve en el cuerpo de un `404` cuando la
 /// capacidad consultada no está configurada (por ejemplo, CodeQL sin análisis).
 pub const NOT_CONFIGURED_MARKER: &str = "no analysis found";
+
+/// Marca que GitHub devuelve en el cuerpo de un `403` cuando los avisos de
+/// Dependabot están deshabilitados en el repositorio.
+///
+/// La redacción literal es
+/// `Dependabot alerts are disabled for this repository.`; se compara la parte
+/// estable y se acepta cualquier capacidad por el sufijo
+/// `are disabled for this repository`.
+pub const DISABLED_MARKER: &str = "are disabled for this repository";
 
 /// Longitud máxima del cuerpo que se conserva en [`GithubError::Http`].
 ///
@@ -47,11 +56,18 @@ pub enum GithubError {
         retry_after: Option<Duration>,
     },
 
+    /// La capacidad consultada está deshabilitada en el repositorio (`403`
+    /// con el cuerpo que GitHub usa para `dependabot/alerts`).
+    ///
+    /// No es un fallo del escaneo: el repositorio simplemente no tiene activada
+    /// la capacidad. Se distingue de [`GithubError::Http`] por el cuerpo.
+    #[error("la capacidad consultada está deshabilitada en el repositorio (403)")]
+    Disabled,
+
     /// Respuesta de error no contemplada más arriba.
     ///
-    /// Cubre, entre otras, el `403` sin `Retry-After` con el que GitHub señala
-    /// que una capacidad está deshabilitada; la fase de recolección lo
-    /// interpreta a partir de `status`.
+    /// Cubre, entre otras, el `403` sin `Retry-After` y con un cuerpo que no es
+    /// el de «capacidad deshabilitada».
     #[error("respuesta inesperada de la API de GitHub: HTTP {status}")]
     Http {
         /// Código de estado HTTP.
@@ -74,6 +90,23 @@ impl GithubError {
     pub fn is_rate_limited(&self) -> bool {
         matches!(self, Self::RateLimited { .. })
     }
+
+    /// Indica si el error representa una capacidad deshabilitada en el
+    /// repositorio.
+    #[must_use]
+    pub fn is_disabled(&self) -> bool {
+        matches!(self, Self::Disabled)
+    }
+}
+
+/// Indica si el cuerpo de un `403` corresponde a «capacidad deshabilitada».
+///
+/// La comparación es insensible a mayúsculas y reconoce la redacción literal de
+/// GitHub (`Dependabot alerts are disabled for this repository.`). Un `403` sin
+/// esta marca sigue siendo [`GithubError::Http`], para no tragarse otros `403`.
+#[must_use]
+pub fn is_disabled_body(body: &str) -> bool {
+    body.to_ascii_lowercase().contains(DISABLED_MARKER)
 }
 
 /// Clasifica una respuesta de la API de GitHub en un error tipado.
@@ -85,14 +118,16 @@ impl GithubError {
 ///
 /// `retry_after` es la espera ya extraída de la cabecera `Retry-After`: un
 /// `403` **con** esa cabecera es un límite secundario
-/// ([`GithubError::RateLimited`]); un `403` **sin** ella no lo es y se devuelve
-/// como [`GithubError::Http`] con `status = 403`, de modo que quien recolecta
-/// pueda distinguir «capacidad deshabilitada» de «demasiadas peticiones».
+/// ([`GithubError::RateLimited`]); un `403` **sin** ella es
+/// [`GithubError::Disabled`] si su cuerpo lleva la marca de capacidad
+/// deshabilitada, y [`GithubError::Http`] con `status = 403` en caso contrario.
 ///
 /// # Errores
 ///
 /// - [`GithubError::Unauthorized`] para `401`.
 /// - [`GithubError::RateLimited`] para `403` con `Retry-After`.
+/// - [`GithubError::Disabled`] para `403` con el cuerpo de capacidad
+///   deshabilitada y sin `Retry-After`.
 /// - [`GithubError::NotConfigured`] para `404` con `no analysis found`.
 /// - [`GithubError::NotFound`] para el resto de `404`.
 /// - [`GithubError::Http`] para cualquier otro `status` que no sea `2xx`.
@@ -107,6 +142,7 @@ pub fn classify_response(
             Some(retry_after) => Err(GithubError::RateLimited {
                 retry_after: Some(retry_after),
             }),
+            None if is_disabled_body(body) => Err(GithubError::Disabled),
             None => Err(GithubError::Http {
                 status,
                 body: truncate_body(body),
@@ -171,6 +207,9 @@ mod tests {
     }
 
     /// Un `403` con `Retry-After` es `RateLimited` y conserva la espera.
+    ///
+    /// El límite tiene prioridad sobre la marca de capacidad deshabilitada: si
+    /// GitHub acompaña un `403` con `Retry-After`, es un límite.
     #[test]
     fn classify_response_403_con_retry_after_es_rate_limited() {
         let err = classify_response(403, "{}", Some(Duration::from_secs(30)))
@@ -183,20 +222,52 @@ mod tests {
         }
     }
 
-    /// Un `403` sin `Retry-After` no es un límite: es un `Http` con estado 403
-    /// (capacidad deshabilitada).
+    /// Un `403` **con** `Retry-After` y el cuerpo de «deshabilitado» sigue siendo
+    /// un límite: la cabecera manda.
     #[test]
-    fn classify_response_403_sin_retry_after_es_http() {
+    fn classify_response_403_con_retry_after_y_cuerpo_disabled_es_rate_limited() {
         let err = classify_response(
             403,
-            "{\"message\":\"Dependabot alerts are disabled\"}",
-            None,
+            "{\"message\":\"Dependabot alerts are disabled for this repository.\"}",
+            Some(Duration::from_secs(5)),
         )
-        .expect_err("403 sin Retry-After debe fallar");
+        .expect_err("403 con Retry-After debe fallar");
+        assert!(matches!(err, GithubError::RateLimited { .. }));
+    }
+
+    /// Un `403` sin `Retry-After` cuyo cuerpo es el literal de Dependabot es
+    /// `Disabled`.
+    #[test]
+    fn classify_response_403_cuerpo_deshabilitado_es_disabled() {
+        let cuerpo = "{\"message\":\"Dependabot alerts are disabled for this repository.\",\"documentation_url\":\"https://docs.github.com/rest/dependabot/alerts#list-dependabot-alerts-for-a-repository\",\"status\":\"403\"}";
+        let err = classify_response(403, cuerpo, None).expect_err("403 debe fallar");
+        assert!(matches!(err, GithubError::Disabled), "se esperaba Disabled");
+    }
+
+    /// Un `403` sin `Retry-After` y con otro cuerpo no es límite ni
+    /// «deshabilitado»: es un `Http` con estado 403.
+    #[test]
+    fn classify_response_403_otro_cuerpo_es_http() {
+        let err = classify_response(403, "{\"message\":\"Resource not accessible\"}", None)
+            .expect_err("403 sin Retry-After debe fallar");
         match err {
             GithubError::Http { status, .. } => assert_eq!(status, 403),
             otro => panic!("se esperaba Http, no: {otro:?}"),
         }
+    }
+
+    /// `is_disabled_body` reconoce el literal de GitHub (insensible a
+    /// mayúsculas) y no se dispara con cuerpos ajenos.
+    #[test]
+    fn is_disabled_body_reconoce_el_literal() {
+        assert!(is_disabled_body(
+            "{\"message\":\"Dependabot alerts are disabled for this repository.\"}"
+        ));
+        assert!(is_disabled_body(
+            "{\"message\":\"DEPENDABOT ALERTS ARE DISABLED FOR THIS REPOSITORY.\"}"
+        ));
+        assert!(!is_disabled_body("{\"message\":\"Resource not accessible\"}"));
+        assert!(!is_disabled_body(""));
     }
 
     /// Un `404` con la marca de GitHub es `NotConfigured`.

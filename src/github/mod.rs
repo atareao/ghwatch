@@ -18,6 +18,6 @@ pub mod pagination;
 pub mod ratelimit;
 
 pub use client::{GithubClient, GithubConfig, Sleeper, TokioSleeper};
-pub use error::GithubError;
+pub use error::{GithubError, is_disabled_body};
 pub use pagination::next_link;
 pub use ratelimit::{RateLimitState, rate_limit_state, should_pause_before_request};
