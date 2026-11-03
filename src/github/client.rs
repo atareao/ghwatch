@@ -18,7 +18,7 @@
 //! El tiempo no se duerme directamente: se delega en un [`Sleeper`] inyectable,
 //! de modo que los tests pueden comprobar las esperas solicitadas sin esperar.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -27,7 +27,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use serde::de::DeserializeOwned;
 use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
+use tokio::task::{Id, JoinError, JoinSet};
 
 use crate::auth::Token;
 
@@ -287,10 +287,16 @@ impl GithubClient {
 
     /// Aplica `f` a cada elemento con concurrencia acotada por el semáforo.
     ///
-    /// Conserva el orden de `items` en el resultado. Si una tarea falla a nivel
-    /// de runtime (pánico), su resultado se omite; `f` no debería entrar en
-    /// pánico.
-    pub async fn for_each_concurrent<T, F, Fut, O>(&self, items: Vec<T>, f: F) -> Vec<O>
+    /// Conserva el orden de `items`: la salida en la posición `i` corresponde al
+    /// elemento `i`. Cada posición es un `Result`: `Ok(salida)` si la tarea se
+    /// completó, `Err(JoinError)` si la tarea falló a nivel de runtime (pánico o
+    /// cancelación). Los fallos **no** se descartan: el llamante decide qué hacer
+    /// con ellos.
+    pub async fn for_each_concurrent<T, F, Fut, O>(
+        &self,
+        items: Vec<T>,
+        f: F,
+    ) -> Vec<Result<O, JoinError>>
     where
         T: Send + 'static,
         F: Fn(T) -> Fut + Send + Sync + 'static,
@@ -299,22 +305,31 @@ impl GithubClient {
     {
         let tarea = Arc::new(f);
         let mut conjunto: JoinSet<(usize, O)> = JoinSet::new();
+        let mut indices: HashMap<Id, usize> = HashMap::new();
 
+        let total = items.len();
         for (indice, item) in items.into_iter().enumerate() {
             let tarea = Arc::clone(&tarea);
             let limiter = Arc::clone(&self.limiter);
-            conjunto.spawn(async move {
+            let handle = conjunto.spawn(async move {
                 // `acquire` solo falla si el semáforo se cierra, algo que aquí no
                 // ocurre: en ese caso se ejecuta sin permiso para no perder trabajo.
                 let _permiso = limiter.acquire().await.ok();
                 (indice, tarea(item).await)
             });
+            indices.insert(handle.id(), indice);
         }
 
-        let mut pares: Vec<(usize, O)> = Vec::with_capacity(conjunto.len());
-        while let Some(resultado) = conjunto.join_next().await {
-            if let Ok(par) = resultado {
-                pares.push(par);
+        let mut pares: Vec<(usize, Result<O, JoinError>)> = Vec::with_capacity(total);
+        while let Some(resultado) = conjunto.join_next_with_id().await {
+            match resultado {
+                Ok((_, (indice, salida))) => pares.push((indice, Ok(salida))),
+                Err(error) => {
+                    // Un `JoinError` no dice a qué elemento correspondía, pero el
+                    // `Id` de la tarea sí: se guardó al lanzarla.
+                    let indice = indices.get(&error.id()).copied().unwrap_or(usize::MAX);
+                    pares.push((indice, Err(error)));
+                }
             }
         }
         pares.sort_by_key(|(indice, _)| *indice);
@@ -546,10 +561,34 @@ mod tests {
     #[tokio::test]
     async fn for_each_concurrent_conserva_el_orden() {
         let cliente = cliente_de_prueba();
-        let salidas = cliente
+        let salidas: Vec<u32> = cliente
             .for_each_concurrent(vec![1u32, 2, 3, 4], |numero| async move { numero * 10 })
-            .await;
+            .await
+            .into_iter()
+            .map(|salida| salida.expect("la tarea debería completarse"))
+            .collect();
         assert_eq!(salidas, vec![10, 20, 30, 40]);
+    }
+
+    /// `for_each_concurrent` no se traga los fallos: un pánico en una tarea se
+    /// devuelve como `Err` en su posición, sin perderse.
+    #[tokio::test]
+    async fn for_each_concurrent_expone_los_fallos() {
+        let cliente = cliente_de_prueba();
+        let salidas = cliente
+            .for_each_concurrent(vec![1u32, 2, 3], |numero| async move {
+                assert!(numero != 2, "pánico deliberado en la tarea del 2");
+                numero * 10
+            })
+            .await;
+
+        assert_eq!(salidas.len(), 3, "deben devolverse todas las posiciones");
+        assert!(salidas[0].is_ok(), "la tarea 1 debería completarse");
+        assert!(
+            salidas[1].is_err(),
+            "el fallo de la tarea 2 debería aflorar como `Err`"
+        );
+        assert!(salidas[2].is_ok(), "la tarea 3 debería completarse");
     }
 
     /// El `Debug` del cliente redacta el token.
