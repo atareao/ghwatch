@@ -38,7 +38,7 @@ use crate::github::client::GithubClient;
 use crate::github::code_scanning::{self, CodeScanningReport};
 use crate::github::dependabot;
 use crate::github::repos::{self, RepoSelection};
-use crate::github::secret_scanning;
+use crate::github::secret_scanning::{self, SecretScanningReport};
 
 /// Recolección de las tres fuentes de alertas de un repositorio.
 #[derive(Debug, Clone, PartialEq)]
@@ -52,8 +52,8 @@ pub struct RepoScan {
     /// Alertas normalizadas de Dependabot; vacío si la capacidad está
     /// deshabilitada.
     pub dependabot_alerts: Vec<Alert>,
-    /// Alertas normalizadas de secret scanning.
-    pub secrets: Vec<Alert>,
+    /// Informe de secret scanning: si la fuente era observable y sus alertas.
+    pub secrets: SecretScanningReport,
     /// Informe de code scanning: si hay análisis configurado y sus alertas.
     pub code: CodeScanningReport,
 }
@@ -62,14 +62,14 @@ impl RepoScan {
     /// Número total de alertas normalizadas del repositorio.
     #[must_use]
     pub fn alert_count(&self) -> usize {
-        self.dependabot_alerts.len() + self.secrets.len() + self.code.alerts.len()
+        self.dependabot_alerts.len() + self.secrets.alerts.len() + self.code.alerts.len()
     }
 
     /// Itera las alertas normalizadas de las tres fuentes, en orden.
     pub fn alerts(&self) -> impl Iterator<Item = &Alert> {
         self.dependabot_alerts
             .iter()
-            .chain(&self.secrets)
+            .chain(&self.secrets.alerts)
             .chain(&self.code.alerts)
     }
 }
@@ -397,9 +397,12 @@ mod tests {
                 dependabot,
             },
             dependabot_alerts: vec![alerta(AlertSource::Dependabot, "1")],
-            secrets: (0..extras)
-                .map(|indice| alerta(AlertSource::Secret, &indice.to_string()))
-                .collect(),
+            secrets: SecretScanningReport {
+                observable: true,
+                alerts: (0..extras)
+                    .map(|indice| alerta(AlertSource::Secret, &indice.to_string()))
+                    .collect(),
+            },
             code: CodeScanningReport {
                 configured: true,
                 alerts: Vec::new(),
