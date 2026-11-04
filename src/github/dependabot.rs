@@ -12,6 +12,7 @@ use crate::domain::alert::{Alert, AlertSource, Severity};
 use crate::domain::repo::DependabotState;
 
 use super::client::GithubClient;
+use super::datetime::parse_rfc3339;
 use super::error::GithubError;
 
 /// Resultado de consultar las alertas de Dependabot de un repositorio.
@@ -54,6 +55,12 @@ pub async fn collect(
 struct RawAlert {
     /// Número de la alerta dentro del repositorio.
     number: u64,
+    /// Instante de creación de la alerta tal y como lo publica GitHub.
+    ///
+    /// Se guarda **crudo** y se normaliza aparte: una fecha presente pero
+    /// ilegible no debe hacer fallar la deserialización de toda la respuesta.
+    #[serde(default)]
+    created_at: Option<String>,
     #[serde(default)]
     dependency: RawDependency,
     #[serde(default)]
@@ -114,6 +121,7 @@ impl RawAlert {
                 .first_patched_version
                 .and_then(|parche| parche.identifier),
             secret_type: None,
+            created_at: parse_rfc3339(self.created_at.as_deref()),
         }
     }
 }
@@ -186,6 +194,7 @@ mod tests {
     fn crudo(vulnerabilidad: RawPackage, dependencia: RawPackage) -> RawAlert {
         RawAlert {
             number: 1,
+            created_at: None,
             dependency: RawDependency {
                 package: Some(dependencia),
                 manifest_path: None,

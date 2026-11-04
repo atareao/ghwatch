@@ -44,6 +44,7 @@ mod history {
             vulnerable_range: None,
             first_patched: None,
             secret_type: None,
+            created_at: None,
         }
     }
 

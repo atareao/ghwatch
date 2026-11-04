@@ -118,13 +118,30 @@
 
 ## 5. Enriquecimiento OSV y priorización
 
-- [ ] 5.1 RED — escribir el test con `wiremock` de 1500 pares que espera exactamente 2 peticiones a `POST /v1/querybatch` y que debe fallar porque no existe el cliente OSV; comando `cargo test osv`; pegar la salida en rojo.
-- [ ] 5.2 RED — escribir el test de mapeo de ecosistemas (`pip → PyPI`, etc.) y de la omisión sin error de un ecosistema sin equivalencia; comando `cargo test osv`; pegar la salida en rojo.
-- [ ] 5.3 RED — escribir el test de «completar sin sobreescribir» (`first_patched` de GitHub conservado, `cvss` a 0 completado por OSV); comando `cargo test osv`; pegar la salida en rojo.
-- [ ] 5.4 RED — escribir el test de fallo de OSV que espera escaneo correcto, alertas sin enriquecer y aviso; comando `cargo test osv`; pegar la salida en rojo.
-- [ ] 5.5 RED — escribir el test de priorización determinista (antigüedad y reproducibilidad) que debe fallar; comando `cargo test priority`; pegar la salida en rojo.
-- [ ] 5.6 GREEN — implementar el cliente OSV por lotes, la tabla de mapeo, la fusión sin sobreescritura y la priorización; confirmar con `cargo test osv priority` y `cargo check`.
-- [ ] 5.7 Auditoría con `@rust-reviewer` del enriquecimiento y la priorización.
+- [x] 5.1 RED — escribir el test con `wiremock` de 1500 pares que espera exactamente 2 peticiones a `POST /v1/querybatch` y que debe fallar porque no existe el cliente OSV; comando `cargo test osv`; pegar la salida en rojo. ROJO: `E0432 unresolved import ghwatch::osv` y `E0425 cannot find function scan_with_enrichment`.
+- [x] 5.2 RED — escribir el test de mapeo de ecosistemas (`pip → PyPI`, etc.) y de la omisión sin error de un ecosistema sin equivalencia; comando `cargo test osv`; pegar la salida en rojo. ROJO: `E0432 unresolved import ghwatch::osv::map_ecosystem`.
+- [x] 5.3 RED — escribir el test de «completar sin sobreescribir» (`first_patched` de GitHub conservado, `cvss` a 0 completado por OSV); comando `cargo test osv`; pegar la salida en rojo. ROJO: `E0560 no field created_at on type Alert`.
+- [x] 5.4 RED — escribir el test de fallo de OSV que espera escaneo correcto, alertas sin enriquecer y aviso; comando `cargo test osv`; pegar la salida en rojo. ROJO: `E0432 unresolved import ghwatch::osv::OsvClient`.
+- [x] 5.5 RED — escribir el test de priorización determinista (antigüedad y reproducibilidad) que debe fallar; comando `cargo test priority`; pegar la salida en rojo. ROJO: `E0432 unresolved import ghwatch::domain::priority`.
+- [x] 5.6 GREEN — implementar el cliente OSV por lotes, la tabla de mapeo, la fusión sin sobreescritura y la priorización; confirmar con `cargo test osv priority` y `cargo check`. VERDE: `cargo test osv priority` (32 tests), `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` y `cargo test` (183 tests) en verde.
+- [x] 5.7 Auditoría con `@rust-reviewer` del enriquecimiento y la priorización.
+
+### 5.8 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la Fase 5 (veredicto: aprobado con reservas, cero bloqueantes). Todos aplicados con TDD (rojo → verde).
+
+- [x] 5.8.1 I1 — la fecha `created_at` de las tres fuentes se guarda **cruda** (`Option<String>`) y se normaliza con el nuevo `github::datetime::parse_rfc3339`, que devuelve `None` si no es una fecha `RFC 3339` legible. Una fecha presente pero ilegible ya no hace fallar la deserialización de la respuesta completa (que perdía **todas** las alertas del repositorio y lo contaba como fallido). Verificación: `cargo test --test alerts dependabot_tolera_una_fecha_ilegible` (rojo: `Transport("error decoding response body")`).
+- [x] 5.8.2 I2 — se captura el `id` de la vulnerabilidad de OSV (`RawVuln::id`) y `QueryResult::aggregate(expected_id)` **prefiere** la vulnerabilidad cuyo `id` coincide con el `ghsa_id` de la alerta (transportado en `OsvQuery::advisory_id`, que no se envía a OSV). Así no se mezclan el CVSS, el alias CVE ni la versión corregida de otra vulnerabilidad del mismo paquete. Sin coincidencia se conserva el agregado determinista y se documenta como limitación conocida. Verificación: `cargo test --test osv la_correlacion_por_ghsa_elige_la_vulnerabilidad_correcta` (rojo: `left: Some("CVE-2020-0001"), right: Some("CVE-2020-0002")`) y `cargo test --lib la_correlacion_restringe_el_agregado`.
+- [x] 5.8.3 I3 — el contrato de la petición a OSV queda verificado: matcher `body_partial_json` sobre `queries[0].package == {name, ecosystem}`, matcher propio `SinVersion` que exige la **ausencia** de `version` cuando es `None`, y aserción de que ninguna petición trae cabecera `Authorization`. Verificación: `cargo test --test osv la_peticion_a_osv_lleva_el_cuerpo_esperado_y_sin_credenciales`.
+- [x] 5.8.4 I4 — cobertura de `created_at` en los tres colectores: valor válido normalizado (secret y code scanning) y fecha ilegible → `None` con el resto de campos intacto (los tres). Verificación: `cargo test --test alerts fecha_ilegible` y `cargo test --test alerts normaliza_created_at`.
+- [x] 5.8.5 M1 — `cvss::parse_score` descarta valores no finitos (`NaN`, `inf`) y fuera de `[0, 10]`, de modo que un `cvss` corrupto no contamina la priorización. Verificación: `cargo test --lib una_puntuacion_no_finita_o_fuera_de_rango_se_descarta` (rojo: `Some(NaN)`).
+- [x] 5.8.6 M2 — se documenta como limitación conocida que el `next_page_token` de OSV se ignora a propósito (el enriquecimiento es best-effort). Verificación: revisión del doc de módulo de `src/osv/client.rs`.
+- [x] 5.8.7 M3 — el desempate de la priorización se amplía a **todos** los campos del modelo que no entran en la puntuación (severidad, CVSS, versión corregida, ámbito, resumen, manifiesto, rango vulnerable y tipo de secreto), de modo que el orden es literalmente total como afirma el doc. Verificación: `cargo test --test priority el_desempate_es_total_hasta_el_ultimo_campo` (rojo: `left: Some("beta"), right: Some("alpha")`).
+- [x] 5.8.8 M4 — test que captura el log a nivel `DEBUG` y afirma el evento de omisión por ecosistema no mapeado. Verificación: `cargo test --test osv la_omision_por_ecosistema_se_registra_en_debug`.
+- [x] 5.8.9 M5 — se documenta el riesgo de grafía de GitHub Actions y se aceptan ambas formas (`github-actions` y `github_actions`) en el mapeo. Verificación: `cargo test --lib acepta_las_dos_graficas_de_github_actions`.
+- [x] 5.8.10 M6 — la columna `created_at` se añade al esquema (`migrations/0001_initial.sql`), se vincula en el INSERT/UPDATE de `store::persist`, se expone en `StoredAlert` y se documenta en `PLAN.md` §4, eliminando la deriva spec↔esquema. Verificación: `cargo test --test store la_fecha_de_creacion_persiste_y_se_recupera` (rojo: `E0609: no field created_at on type StoredAlert`).
+- [x] 5.8.11 M7 — una fusión que no aporta información no cuenta como `enriched`: un aviso cuyo único dato sea un CVSS nulo no se aplica (ni puebla el campo). Verificación: `cargo test --test osv un_aviso_sin_informacion_no_cuenta_como_enriquecido` (rojo: `left: 1, right: 0`).
+- [x] 5.8.12 Verificación final: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` y `cargo test` (199 tests) en verde.
 
 ## 6. Informes y notificación a Valet
 

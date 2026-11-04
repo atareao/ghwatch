@@ -80,7 +80,7 @@ La autenticación SHALL resolverse en el orden `GITHUB_TOKEN` → `gh auth token
 
 ### Requirement: La alerta normalizada SHALL tener un modelo único con independencia de su origen
 
-Toda alerta SHALL normalizarse a un modelo único con los campos `source`, `external_id`, `ghsa_id`, `cve_id`, `severity`, `cvss`, `summary`, `package`, `ecosystem`, `manifest_path`, `scope`, `vulnerable_range`, `first_patched` y `secret_type`, donde `source` pertenece al conjunto cerrado `{dependabot, secret, code}`.
+Toda alerta SHALL normalizarse a un modelo único con los campos `source`, `external_id`, `ghsa_id`, `cve_id`, `severity`, `cvss`, `summary`, `package`, `ecosystem`, `manifest_path`, `scope`, `vulnerable_range`, `first_patched`, `secret_type` y `created_at`, donde `source` pertenece al conjunto cerrado `{dependabot, secret, code}`. `created_at` SHALL poblarse desde el instante de creación que publica GitHub para las tres fuentes, y es el dato que consume la priorización por antigüedad.
 
 #### Scenario: Alerta de Dependabot
 

@@ -83,8 +83,8 @@ Principio: `domain` es puro y testeable sin red ni BD; el resto depende de él, 
 - `repos(id, name_with_owner, private, archived, fork, language, pushed_at, alerts_enabled, last_scanned_at)`
 - `scan_runs(id, started_at, finished_at, total_repos, ok, failed, alerts_total, schema_version)`
 - `alerts(id, repo, source, external_id, ghsa_id, cve_id, severity, cvss, summary, package,
-  ecosystem, manifest_path, scope, vulnerable_range, first_patched, secret_type, state,
-  first_seen_run, last_seen_run, resolved_at)`
+  ecosystem, manifest_path, scope, vulnerable_range, first_patched, secret_type, created_at,
+  state, first_seen_run, last_seen_run, resolved_at)`
 - `alert_events(id, alert_id, run_id, change, state, resolved_at)` — `change ∈ {new, still_open, resolved, reopened, severity_up}`;
   `state` y `resolved_at` guardan la **instantánea** del ciclo de vida en el run del evento, de
   modo que el diff de un run es **histórico** y no cambia si la alerta se reabre después.

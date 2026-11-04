@@ -39,6 +39,7 @@ mod store {
             vulnerable_range: None,
             first_patched: None,
             secret_type: None,
+            created_at: None,
         }
     }
 
@@ -513,6 +514,31 @@ mod store {
             alertas[0].secret_type.as_deref(),
             Some("adafruit_io_key"),
             "el tipo de secreto debe persistirse y recuperarse"
+        );
+    }
+
+    /// M6 — La fecha de creación de la alerta se persiste y se recupera, sin
+    /// dejar deriva entre el modelo y el esquema.
+    #[tokio::test]
+    async fn la_fecha_de_creacion_persiste_y_se_recupera() {
+        let store = store().await;
+        let mut con_fecha = alerta(AlertSource::Dependabot, "1", Some(Severity::High));
+        con_fecha.created_at = Some(instante(1_700_000_000));
+        let escaneo = resumen(vec![repo_scan("atareao/uno", vec![con_fecha])], 0);
+
+        store
+            .persist_scan(&escaneo, instante(1), instante(2))
+            .await
+            .expect("escaneo");
+
+        let alertas = store
+            .alerts_for_repo("atareao/uno")
+            .await
+            .expect("alertas del repositorio");
+        assert_eq!(
+            alertas[0].created_at,
+            Some(instante(1_700_000_000)),
+            "la fecha de creación debe persistirse y recuperarse"
         );
     }
 

@@ -39,6 +39,7 @@ use crate::github::code_scanning::{self, CodeScanningReport};
 use crate::github::dependabot;
 use crate::github::repos::{self, RepoSelection};
 use crate::github::secret_scanning::{self, SecretScanningReport};
+use crate::osv::OsvClient;
 
 /// Recolección de las tres fuentes de alertas de un repositorio.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +72,17 @@ impl RepoScan {
             .iter()
             .chain(&self.secrets.alerts)
             .chain(&self.code.alerts)
+    }
+
+    /// Itera mutablemente las alertas normalizadas de las tres fuentes, en orden.
+    ///
+    /// Lo usa el enriquecimiento para completar las alertas **in situ** tras la
+    /// recolección.
+    pub fn alerts_mut(&mut self) -> impl Iterator<Item = &mut Alert> {
+        self.dependabot_alerts
+            .iter_mut()
+            .chain(self.secrets.alerts.iter_mut())
+            .chain(self.code.alerts.iter_mut())
     }
 }
 
@@ -233,7 +245,8 @@ impl ProgressReporter for HiddenReporter {
 ///
 /// Descubre el inventario, aplica `selection`, recolecta las tres fuentes por
 /// repositorio con la concurrencia acotada del cliente y devuelve el
-/// [`ScanSummary`].
+/// [`ScanSummary`]. No realiza enriquecimiento: para completar las alertas con
+/// OSV, usa [`scan_with_enrichment`].
 ///
 /// El cliente se recibe en un [`Arc`] porque
 /// [`GithubClient::for_each_concurrent`] ejecuta cada repositorio en una tarea
@@ -249,6 +262,32 @@ pub async fn scan(
     client: Arc<GithubClient>,
     selection: RepoSelection,
     reporter: Arc<dyn ProgressReporter>,
+) -> Result<ScanSummary, GithubError> {
+    scan_inner(client, selection, reporter, None).await
+}
+
+/// Ejecuta un escaneo completo y enriquece sus alertas con OSV.
+///
+/// Es la variante de [`scan`] con enriquecimiento **best-effort**: tras
+/// recolectar, completa las alertas con el catálogo de OSV. Si OSV falla o
+/// expira, el escaneo **concluye igualmente**: se registra un aviso y las
+/// alertas se reportan sin enriquecer. El enriquecimiento nunca aborta el
+/// escaneo.
+pub async fn scan_with_enrichment(
+    client: Arc<GithubClient>,
+    selection: RepoSelection,
+    reporter: Arc<dyn ProgressReporter>,
+    enricher: Arc<OsvClient>,
+) -> Result<ScanSummary, GithubError> {
+    scan_inner(client, selection, reporter, Some(enricher)).await
+}
+
+/// Núcleo del escaneo, con enriquecimiento opcional.
+async fn scan_inner(
+    client: Arc<GithubClient>,
+    selection: RepoSelection,
+    reporter: Arc<dyn ProgressReporter>,
+    enricher: Option<Arc<OsvClient>>,
 ) -> Result<ScanSummary, GithubError> {
     let inventario = repos::discover(&client).await?;
     let seleccionados = repos::select(inventario, selection);
@@ -274,9 +313,38 @@ pub async fn scan(
         })
         .await;
 
-    let resumen = aggregate(resultados);
+    let mut resumen = aggregate(resultados);
+    if let Some(enricher) = enricher {
+        enriquecer(&enricher, &mut resumen).await;
+    }
     reporter.finish();
     Ok(resumen)
+}
+
+/// Completa las alertas del resumen con OSV, best-effort.
+///
+/// Un fallo de OSV no aborta el escaneo: se registra un aviso y las alertas
+/// quedan sin enriquecer (la fusión solo se aplica si la respuesta llega
+/// completa).
+async fn enriquecer(enricher: &OsvClient, resumen: &mut ScanSummary) {
+    let alertas: Vec<&mut Alert> = resumen
+        .scanned
+        .iter_mut()
+        .flat_map(RepoScan::alerts_mut)
+        .collect();
+
+    match enricher.enrich(alertas).await {
+        Ok(resultado) => tracing::debug!(
+            consultadas = resultado.queried,
+            enriquecidas = resultado.enriched,
+            omitidas = resultado.skipped,
+            "enriquecimiento OSV completado"
+        ),
+        Err(error) => tracing::warn!(
+            error = %error,
+            "OSV no disponible: el escaneo continúa con las alertas sin enriquecer"
+        ),
+    }
 }
 
 /// Agrega las salidas de las tareas en un [`ScanSummary`], conservando el orden
@@ -380,6 +448,7 @@ mod tests {
             vulnerable_range: None,
             first_patched: None,
             secret_type: None,
+            created_at: None,
         }
     }
 

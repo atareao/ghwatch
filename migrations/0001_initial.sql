@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     vulnerable_range TEXT,
     first_patched    TEXT,
     secret_type      TEXT,
+    created_at       TEXT,
     state            TEXT    NOT NULL DEFAULT 'open',
     first_seen_run   INTEGER NOT NULL,
     last_seen_run    INTEGER NOT NULL,
