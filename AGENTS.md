@@ -1,23 +1,28 @@
 # AGENTS.md — ghwatch
 
-CLI en Rust (edición 2024) que vigilará vulnerabilidades en todos los repos GitHub de una
+CLI en Rust (edición 2024) que vigila las vulnerabilidades en todos los repos GitHub de una
 cuenta (Dependabot + secret/code scanning, enriquecido con OSV.dev, con histórico SQLite e
 informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.md`.
 
 ## Estado actual — leer antes de tocar código
 
-- **`src/main.rs` es un stub que imprime `Hello, world!`.** No hay CLI (ni `clap`) ni
-  `config.rs`. `cargo install ghwatch` **no** da un escáner.
-- Implementado y auditado (biblioteca): `auth`; `github` (cliente HTTP + recolección del
-  inventario y de las tres fuentes de alertas); `domain` (tipos puros, con `priority`);
-  `scan` (orquestación con concurrencia acotada); `store` (persistencia SQLite, ciclo de vida
-  y deriva); `osv` (enriquecimiento best-effort por lotes contra OSV.dev); `report` (consola,
-  Markdown y JSON, sin red); `notify` (notificador Valet best-effort + coordinación informe/envío).
-- **Sin escribir todavía** (planificado en `PLAN.md`): `cli`, `config` (la config de ejecución del
-  CLI; `notify::config` ya resuelve la de Valet) y el cableado de los subcomandos
-  `scan|report|diff|history|notify|init`.
-- No implementes módulos ni "arregles" el stub por iniciativa propia: el trabajo pasa por el
-  flujo de spec (abajo).
+- **CLI completo y operativo.** `src/main.rs` configura `tracing` (siempre a `stderr`) y
+  delega en `ghwatch::cli::run`; `src/cli.rs` cablea los seis subcomandos
+  `scan|report|diff|history|notify|init` y `src/config.rs` resuelve la configuración con
+  precedencia **flags > entorno > fichero > defecto**. Códigos de salida: `0` éxito, `2` uso,
+  `3` sin credencial de GitHub, `4` fallo de la API de GitHub y `5` fallo local (base de datos,
+  informe o E/S). `cargo install ghwatch` da el escáner real.
+- Implementado y auditado: `auth`; `github` (cliente HTTP + recolección del inventario y de las
+  tres fuentes de alertas); `domain` (tipos puros, con `priority`); `scan` (orquestación con
+  concurrencia acotada); `store` (persistencia SQLite, ciclo de vida y deriva); `osv`
+  (enriquecimiento best-effort por lotes contra OSV.dev); `report` (consola, Markdown y JSON,
+  sin red); `notify` (notificador Valet best-effort + coordinación informe/envío); `cli` (`clap`
+  con los seis subcomandos y los códigos de salida) y `config` (config.toml + entorno +
+  precedencia y permisos).
+- Operación lista: unidades de usuario de systemd (`systemd/ghwatch.service` y `ghwatch.timer`)
+  y recetas en `justfile`; la CI (`.github/workflows/ci.yml`) corre fmt → clippy → test.
+- El trabajo pasa por el flujo SDD + TDD + auditoría descrito más abajo; no se implementan
+  módulos ni se cambia el comportamiento por iniciativa propia.
 
 ## Flujo obligatorio (SDD + TDD)
 
@@ -38,7 +43,7 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
-cargo test                          # 244 tests, sin red y sin token
+cargo test                          # 289 tests, sin red y sin token
 cargo test github                   # filtra por nombre (ver convención de tests)
 cargo test store                    # persistencia e histórico
 cargo test drift                    # clasificación de deriva
@@ -47,6 +52,8 @@ cargo test osv                      # enriquecimiento OSV por lotes
 cargo test priority                 # priorización determinista
 cargo test report                   # consola, Markdown y JSON
 cargo test notify                   # notificador Valet y límites en bytes
+cargo test cli                      # subcomandos, códigos de salida y extremo a extremo
+cargo test config                   # precedencia, permisos y valores por defecto
 cargo test github::paginacion_sigue # un solo test
 cargo test auth::token_redacta
 ```

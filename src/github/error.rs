@@ -94,6 +94,16 @@ pub enum GithubError {
     #[error("error de transporte con la API de GitHub: {0}")]
     Transport(String),
 
+    /// La URL base configurada para la API no es una URL absoluta válida.
+    ///
+    /// Es un error local de configuración, no una respuesta de la API: el CLI lo
+    /// mapea a [`crate::cli::EXIT_STORE`] en lugar de a `EXIT_GITHUB`.
+    #[error("la URL base de la API de GitHub no es válida: {url:?}")]
+    InvalidBaseUrl {
+        /// URL base tal como se configuró.
+        url: String,
+    },
+
     /// La tarea que recolectaba un repositorio falló en el runtime.
     ///
     /// A diferencia de [`GithubError::Transport`], **no** describe un problema
@@ -130,6 +140,13 @@ impl GithubError {
     #[must_use]
     pub fn is_task_failed(&self) -> bool {
         matches!(self, Self::TaskFailed(_))
+    }
+
+    /// Indica si el error es una URL base mal configurada (error local, no de
+    /// la API).
+    #[must_use]
+    pub fn is_invalid_base_url(&self) -> bool {
+        matches!(self, Self::InvalidBaseUrl { .. })
     }
 }
 

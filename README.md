@@ -1,205 +1,320 @@
 # ghwatch
 
-Vigilancia de vulnerabilidades en los repositorios GitHub de una cuenta: alertas de
-Dependabot, secret scanning y enriquecimiento con OSV.dev, con histórico entre
-ejecuciones y un informe de situación actual y evolución.
+[Español](README.es.md) · **English**
 
 [![CI](https://github.com/atareao/ghwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/atareao/ghwatch/actions/workflows/ci.yml)
-[![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](https://github.com/atareao/ghwatch/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/atareao/ghwatch/blob/main/LICENSE)
 
-> [!WARNING]
-> **Proyecto en desarrollo. El binario todavía no hace nada útil.**
->
-> De las secciones de trabajo 0 a 7, están completadas la 0 (aprobación de la
-> especificación) y las fases 1 y 2. Lo que funciona hoy es **solo la
-> biblioteca**:
->
-> - `cargo install ghwatch` **no** da un CLI usable: instalaría un binario cuyo
->   `main` es un stub que imprime `Hello, world!`. No hay `clap`, ni subcomandos,
->   ni banderas, ni base de datos, ni informes.
-> - No hay todavía escaneo, ni persistencia, ni informes, ni notificación.
-> - Lo implementado y auditado es el núcleo reutilizable: resolución de la
->   credencial (`auth`) y cliente HTTP de GitHub (`github`), con **78 tests** que
->   pasan sin red y sin token.
->
-> Este documento describe el **objetivo** del producto y, cuando corresponde, lo
-> que ya existe. Cada apartado indica a qué se refiere.
+`ghwatch` is a Rust CLI that watches every GitHub repository of a single account
+for vulnerabilities, so you no longer have to open them one by one.
 
-## Qué hará
+It collects **Dependabot alerts**, **secret scanning alerts** and **code scanning
+alerts**; enriches them with [OSV.dev](https://osv.dev) (CVSS score, CVE alias
+and the version that fixes the issue); keeps a **SQLite history** between runs;
+produces a **console, Markdown and JSON report** that is always written to disk;
+and optionally **notifies [Valet](https://github.com/atareao/valet)** through its
+ingest API, in a *best-effort* way.
 
-El producto final es un CLI en Rust, `ghwatch`, que recorrerá **todos** los
-repositorios GitHub de una cuenta (para la cuenta `atareao` se midieron **433**,
-de los que **367** están activos) y:
+## Installation
 
-- recogerá las **alertas de Dependabot** (se midieron ~**1.333** alertas abiertas
-  repartidas en 90 repositorios) paginando de forma completa —nunca truncando en
-  el tamaño de página—;
-- recogerá las **alertas de secret scanning** (se midieron 3 abiertas ya en el
-  reconocimiento) y las de **code scanning** cuando CodeQL esté configurado;
-- **enriquecerá** cada alerta con OSV.dev (CVSS, alias CVE y versión que corrige)
-  en lotes y sin sobreescribir los datos que ya aporta GitHub;
-- guardará un **histórico en SQLite** por ejecución y calculará la **evolución**
-  entre escaneos (nuevas, resueltas, reabiertas, subidas de severidad);
-- producirá un **informe de situación actual y evolución** (consola, Markdown y
-  JSON versionado) escrito siempre a disco;
-- **notificará opcionalmente a Valet**, el asistente self-hosted del autor,
-  mediante su API de ingesta ya existente, en modo *best-effort*.
+Requires a recent toolchain for **Rust edition 2024** (Rust 1.85 or newer) and a
+GitHub token with the classic **`repo`** scope.
 
-## Estado por fases
+```bash
+# From a local checkout
+cargo install --path .
 
-La especificación viva está en `openspec/changes/ghwatch-scanner/` y el
-checkpoint arquitectónico en `PLAN.md`.
+# Straight from git
+cargo install --git https://github.com/atareao/ghwatch
+```
 
-| Sección | Estado | Contenido |
-|---|---|---|
-| 0 · Aprobación | ✅ Hecha | `proposal.md` + `design.md` + `tasks.md` aprobados antes de escribir código |
-| 1 · Andamiaje y autenticación | ✅ Hecha | crate `ghwatch`, dependencias, higiene, y el módulo `auth` (más el endurecimiento 1.9) |
-| 2 · Cliente GitHub | ✅ Hecha | `github/`: cabeceras, paginación por `Link`, control de *rate limit*, errores tipados (más el endurecimiento 2.9) |
-| 3 · Inventario y recolección | ⬜ Pendiente | descubrimiento y filtrado de repositorios, alertas de las tres fuentes, orquestación con concurrencia acotada |
-| 4 · Persistencia e histórico | ⬜ Pendiente | migraciones sqlx, upsert idempotente, cálculo de deriva, `history` y `diff` |
-| 5 · Enriquecimiento OSV y priorización | ⬜ Pendiente | cliente OSV por lotes, mapeo de ecosistemas, fusión sin sobreescritura, priorización determinista |
-| 6 · Informes y notificación a Valet | ⬜ Pendiente | salida de consola, Markdown, JSON versionado, notificador a Valet |
-| 7 · Operación | ⬜ Pendiente | unidades systemd de usuario, `justfile`, CI, gitflow y verificación final |
+`cargo install` drops the binary in `~/.cargo/bin/ghwatch`. You can also just run
+it from the source tree with `cargo run --release -- <subcommand>`.
 
-## Arquitectura
+## Quick start
 
-### Módulos (lo que existe hoy)
+```bash
+# 1. Create the database and the configuration template (~600 permissions)
+ghwatch init
+
+# 2. Add your GitHub token (and, optionally, the Valet ingest key)
+$EDITOR ~/.config/ghwatch/config.toml
+
+# 3. Scan the account, persist the run and write the report
+ghwatch scan
+```
+
+By default the database lives at `~/.local/share/ghwatch/ghwatch.db` and the
+reports at `~/.local/share/ghwatch/reports/ghwatch-YYYY-MM-DD.md` and
+`...-YYYY-MM-DD.json` (one pair per day). The scan ends with a one-line summary;
+use `--quiet` to silence the progress bar and the final summary.
+
+## Subcommands
+
+| Command | What it does |
+|---|---|
+| `ghwatch scan` | Scans every repository, persists the run, writes the report and optionally notifies Valet. |
+| `ghwatch report` | Re-emits the latest local report. **No network.** |
+| `ghwatch diff` | Shows the alerts that were new and resolved in the latest run. **No network.** |
+| `ghwatch history` | Shows the stored run series (date, total, new, resolved). **No network.** |
+| `ghwatch notify` | Resends the latest local report to Valet without rewriting it. |
+| `ghwatch init` | Creates the database and the config template, without overwriting existing ones. |
+
+```bash
+# Scan and include forks/archived repositories
+ghwatch scan --include-forks --include-archived
+
+# Scan without OSV enrichment (faster, no third-party calls)
+ghwatch scan --no-enrich
+
+# Re-emit the latest report as JSON on stdout (stderr keeps the logs)
+ghwatch report --format json > report.json
+
+# Changes since the last run, and the last 10 runs
+ghwatch diff
+ghwatch history --limit 10
+
+# Send the latest report again, even without changes
+ghwatch notify --force
+```
+
+`report`, `diff` and `history` **never touch GitHub or Valet**: they read only
+the local database and the report files, so you can rerun them offline. Only
+`scan` scans, and only `scan`/`notify` can reach Valet.
+
+`scan` flags: `--include-forks`, `--include-archived`, `--no-enrich`, `--force`,
+`--quiet`, `-v/--verbose` (repeatable), `--db`, `--report-dir`, `--config`,
+`--concurrency`, `--github-base-url`, `--osv-base-url`, `--valet-base-url`.
+Run `ghwatch <subcommand> --help` for the full list.
+
+## Configuration
+
+The execution config lives in `~/.config/ghwatch/config.toml` and **must keep
+`600` permissions**: it holds credentials in clear text. If the file is more
+permissive than `600`, `ghwatch` rejects it with a warning and does **not** use it
+(falling back to the environment and defaults).
+
+`ghwatch init` writes this template (all keys commented out) only if the file
+does not already exist:
+
+```toml
+# Configuración de ghwatch.
+#
+# Este fichero contiene credenciales en claro: debe conservar permisos 600.
+# Las variables de entorno tienen prioridad sobre estos valores.
+#
+# github_token = "ghp_..."
+# valet_base_url = "http://localhost:3000"
+# valet_ingest_token = "val_..."
+# db_path = "~/.local/share/ghwatch/ghwatch.db"
+# report_dir = "~/.local/share/ghwatch/reports"
+# concurrency = 6
+# include_forks = false
+# include_archived = false
+```
+
+Keys:
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `github_token` | string | — | GitHub credential. Prefer `GITHUB_TOKEN`. |
+| `valet_base_url` | string | `http://localhost:3000` | Valet base URL. |
+| `valet_ingest_token` | string | — | Valet ingest key (`val_…`). |
+| `db_path` | path | `~/.local/share/ghwatch/ghwatch.db` | SQLite database. |
+| `report_dir` | path | `~/.local/share/ghwatch/reports` | Report directory. |
+| `concurrency` | integer | `6` | GitHub client concurrency. |
+| `include_forks` | bool | `false` | Include forks in the inventory. |
+| `include_archived` | bool | `false` | Include archived repositories. |
+| `github_base_url` | string | `https://api.github.com` | GitHub API base (for testing). |
+| `osv_base_url` | string | `https://api.osv.dev` | OSV base (for testing). |
+
+`valet_base_url`/`valet_ingest_token` are also accepted under the aliases
+`base_url`/`ingest_token`. Unknown keys are ignored. Paths starting with `~` are
+expanded against `$HOME`.
+
+Environment variables:
+
+| Variable | Overrides key |
+|---|---|
+| `GITHUB_TOKEN` | `github_token` |
+| `VALET_BASE_URL` | `valet_base_url` |
+| `VALET_INGEST_TOKEN` | `valet_ingest_token` |
+| `GHWATCH_DB` | `db_path` |
+| `GHWATCH_REPORT_DIR` | `report_dir` |
+| `GHWATCH_CONCURRENCY` | `concurrency` |
+| `GHWATCH_INCLUDE_FORKS` | `include_forks` |
+| `GHWATCH_INCLUDE_ARCHIVED` | `include_archived` |
+| `GHWATCH_GITHUB_BASE_URL` | `github_base_url` |
+| `GHWATCH_OSV_BASE_URL` | `osv_base_url` |
+| `RUST_LOG` | Log filter (overrides `--quiet`/`-v`). |
+
+Booleans accept `1/true/yes/on` and `0/false/no/off`.
+
+**Precedence:** command-line flags > environment variables > config file >
+built-in defaults.
+
+## GitHub credential
+
+The token is resolved in this order:
+
+1. The **`GITHUB_TOKEN`** environment variable.
+2. Otherwise, the **`gh`** CLI: `gh auth token`.
+3. Otherwise, an explanatory error and exit code `3`.
+
+The required scope is the classic **`repo`**. Fine-grained tokens work too, as
+long as they grant **Dependabot alerts: read** and **Secret scanning alerts:
+read** for the repositories you want to watch. The token is never logged or
+printed: it is redacted in `Debug`/`Display` and never travels inside an error.
+
+## Valet notification
+
+`ghwatch` sends a *best-effort* summary to Valet through its ingest API. It does
+**not** modify Valet in any way.
+
+**1. Create an ingest key.** The key management routes require a Valet OIDC
+session cookie; the token is shown **only once**, so copy it right away:
+
+```bash
+curl -i -X POST http://localhost:3000/api/ingest-keys \
+  --cookie "valet_session=<your-session-cookie>" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "ghwatch" }'
+# 201 -> { "id": "…", "name": "ghwatch", "prefix": "val_XXXXXXXX", "token": "val_…" }
+```
+
+**2. Store it.** Put the `val_…` token in `~/.config/ghwatch/config.toml`
+(`valet_ingest_token`, still `600`) or export `VALET_INGEST_TOKEN`.
+
+**3. Send.** `scan` notifies on its own; `notify` resends the latest local report:
+
+```bash
+ghwatch scan                 # scan, write the report and notify if there is news
+ghwatch scan --force         # notify even without changes
+ghwatch notify               # resend the latest report, no scanning
+```
+
+By default the notification follows the **only-on-change** rule: it is sent only
+when `new > 0` or `resolved > 0` (this avoids a daily "nothing happened" message).
+`--force` bypasses that rule. A Valet failure is **best-effort**: it never changes
+the exit code, and the report on disk is already written. The `message` is capped
+at 4096 bytes (trimmed on UTF-8 boundaries, never splitting a character) and the
+`metadata` at 8192 bytes, always referencing the report path on disk.
+
+**Verify** that the notification arrived with the inbox (OIDC session required):
+
+```bash
+curl -i "http://localhost:3000/api/notifications/unread?limit=5" \
+  --cookie "valet_session=<your-session-cookie>"
+```
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success. Also covers "Valet is down" and "nothing new". |
+| `2` | Usage error (emitted by `clap`). |
+| `3` | No usable GitHub credential. |
+| `4` | Fatal GitHub API failure. |
+| `5` | Fatal local failure: database, report or I/O. |
+
+## Operation
+
+A **systemd user timer** runs a daily scan at 07:00 (`Persistent=true`, so a
+missed run happens after boot). The units live in `systemd/`:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/ghwatch.service systemd/ghwatch.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now ghwatch.timer
+
+# Run even when no session is open
+loginctl enable-linger "$USER"
+```
+
+If the binary is not in `~/.local/bin/ghwatch`, adjust `ExecStart` in
+`ghwatch.service` (for example `%h/.cargo/bin/ghwatch scan`). Check the timer and
+its logs with:
+
+```bash
+systemctl --user list-timers ghwatch.timer
+journalctl --user -u ghwatch
+```
+
+The [`justfile`](justfile) wraps the common operations:
+
+```bash
+just --list        # list the recipes
+just scan          # cargo run --release -- scan
+just report --format markdown
+just check         # fmt-check + clippy + tests
+just build-release # cargo build --release --locked
+just install-timer # copy the units and enable the timer
+just validate      # openspec validate ghwatch-scanner --strict
+```
+
+The CLI recipes run `cargo run --release -- …` by default; after `just install`
+you can point them at the installed binary with
+`export GHWATCH_BIN=$(command -v ghwatch)`.
+
+## Development
+
+The quality gate is `just check` (or the equivalent directly):
+
+```bash
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+- **Tests never use the network or credentials.** GitHub, OSV and Valet are
+  simulated with [`wiremock`](https://crates.io/crates/wiremock); SQLite runs
+  **in memory** (`sqlite::memory:`, one connection) and migrations are embedded
+  with `include_str!` and applied at runtime (no `DATABASE_URL`, no `query!`).
+- **Test convention:** each file in `tests/` is wrapped in a module named after
+  the file (for example `mod github { … }` in `tests/github.rs`), so
+  `cargo test github` selects only that group.
+- **Language:** source comments and user-facing strings are in Spanish;
+  structural headings and `SHALL`/`MUST` in the spec stay in English.
+
+The project is built with two quality gates and an audit loop:
+
+- **SDD with OpenSpec** — no code or test is written before an approved change
+  exists in `openspec/changes/`. `openspec/` is the living spec: contracts,
+  *Given/When/Then* scenarios and a `tasks.md`. `PLAN.md` is the architectural
+  checkpoint and `AGENTS.md` describes the current state and invariants.
+- **Strict TDD** — every task is red → green → refactor, running the suite from
+  the CLI at each step.
+- **Independent audit** — each phase is reviewed before it is considered closed,
+  and the findings are applied with tests too.
+- **Gitflow with gitmoji** — `main` and `development` only receive changes
+  through pull requests; day-to-day work happens on `feature/*` branches.
+
+## Architecture
 
 ```
 src/
-  main.rs          # stub actual: imprime "Hello, world!"
-  lib.rs           # raíz de la biblioteca (expone `auth` y `github`)
-  auth.rs          # resolución del token: GITHUB_TOKEN → `gh auth token` → error tipado
-  github/
-    mod.rs         # reexporta el cliente, la configuración y los errores
-    client.rs      # cliente reqwest: `get_json` y `get_paginated`, cabeceras y control de cuota
-    error.rs       # `GithubError` tipado (incluye `Disabled` y `NotConfigured`)
-    pagination.rs  # lectura pura de la cabecera `Link` (`rel="next"`)
-    ratelimit.rs   # aritmética pura de `X-RateLimit-*`, `Retry-After` y retroceso exponencial
-tests/
-  auth.rs          # integración de `auth` con dobles (sin procesos externos)
-  github.rs        # integración del cliente con `wiremock` (sin red)
+  main.rs   # entrypoint: configures tracing (stderr) and delegates to cli::run
+  cli.rs    # clap: scan | report | diff | history | notify | init
+  config.rs # config.toml + env + precedence and permission checks
+  auth.rs   # GITHUB_TOKEN -> `gh auth token` -> typed error
+  github/   # HTTP client, Link pagination, rate limit, the three alert sources
+  domain/   # pure types: Alert, Severity, ScanRun, Drift, Priority
+  scan.rs   # bounded-concurrency orchestration and progress
+  osv/      # OSV.dev querybatch client, ecosystem mapping, merge
+  store/    # sqlx migrations, idempotent upsert, lifecycle and drift
+  report/   # console, Markdown and versioned JSON (no network)
+  notify/   # Valet ingest client and report/notify coordination
 ```
 
-Una frase por módulo:
+`domain` is pure and testable with no network or database, and `store` depends on
+`domain` (never the reverse). Reports are written **before** notifying; a Valet
+failure never leaves a half-written report. The measured reconnaissance against
+the author's account found **367 active repositories** with roughly **1.333 open
+alerts across 90 repositories**.
 
-- **`auth`** — obtiene la credencial en el orden `GITHUB_TOKEN` → `gh auth token`
-  → error explicativo, y redacta el token tanto en `Debug`/`Display` como en los
-  mensajes de error; el valor solo se obtiene por `Token::expose_secret()`.
-- **`github::client`** — cliente HTTP sobre `reqwest` que añade las cabeceras
-  exigidas por la API, pagina siguiendo el `Link`, aplica pausa preventiva y
-  reintentos, y acota la concurrencia con un semáforo.
-- **`github::error`** — errores tipados; **nunca** transportan el token.
-- **`github::pagination`** — extracción pura (sin IO) de la URL `rel="next"` de
-  la cabecera `Link`.
-- **`github::ratelimit`** — aritmética pura del límite de peticiones: cuota
-  restante, instante de reposición, `Retry-After` y retroceso exponencial.
+## License
 
-### Módulos previstos (aún no escritos)
+MIT. Author: **Lorenzo Carbonell** (`atareao`) · <https://atareao.es>.
 
-`src/cli.rs`, `src/config.rs`, y los módulos `github/{repos,dependabot,secret_scanning,code_scanning}`,
-`osv/`, `store/`, `domain/`, `report/` y `notify/`. Están planificados en
-`PLAN.md`, no implementados.
-
-### Stack
-
-`Rust` (edición 2024) · `tokio` · `reqwest` con `rustls` · `sqlx` sobre SQLite
-(consultas en tiempo de ejecución, sin `DATABASE_URL` en compilación) · `clap`
-(derive) · `comfy-table` · `indicatif` · `serde` / `serde_json` · `thiserror`
-(con `anyhow` para el binario) · `tracing` / `tracing-subscriber` · `chrono` ·
-`wiremock` solo para los tests.
-
-## Cómo usarlo hoy
-
-Hoy **no** hay un binario útil, así que no hay nada que instalar. Lo que se puede
-ejecutar es la biblioteca y su suite de tests, que no necesitan red ni token:
-
-```bash
-# 78 tests (53 unitarios + 10 de integración de `auth` + 15 de integración de `github`)
-cargo test
-
-# Higiene: sin warnings de Clippy y formato comprobado
-cargo clippy --all-targets -- -D warnings
-cargo fmt --all --check
-```
-
-> **No** ejecutes `cargo install ghwatch` esperando un escáner: instalaría un
-> binario que solo imprime `Hello, world!`. El CLI llegará en fases posteriores;
-> hoy esta biblioteca es la base sobre la que se construirá.
-
-## Credenciales
-
-Cuando exista el CLI, resolverá la credencial de GitHub en este orden (es lo que
-ya implementa `auth`):
-
-1. La variable de entorno **`GITHUB_TOKEN`**.
-2. Si no está, la CLI **`gh`**: `gh auth token`.
-3. Si ninguna funciona, un error que explica las dos vías.
-
-El permiso que necesita lo implementado es el scope clásico **`repo`** (el token
-usado durante el reconocimiento tenía `admin:public_key, gist, read:org, repo`).
-Las cabeceras de autenticación se construyen en un único punto, y el **token nunca
-se registra ni se imprime**: `Token` redacta su valor en `Debug` y `Display`, y
-ningún error (`AuthError`, `GithubError`) puede contenerlo. Hay tests específicos
-que verifican que ni el `Debug` del cliente, ni el de las estructuras que lo
-envuelven, ni los mensajes de error filtran un secreto.
-
-## Notas de implementación
-
-Detalles medidos contra la API real y ya resueltos en la biblioteca:
-
-- **La paginación es por cursor.** El `Link: rel="next"` de Dependabot **no** es
-  la misma ruta con `page=2`: cambia el prefijo
-  (`/repos/{owner}/{repo}/...` → `/repositories/{id}/...`) y añade un cursor
-  opaco `after=<base64>`. Por eso el cliente sigue la URL del `Link` **tal cual**,
-  sin recomponerla; recomponerla perdería la página siguiente.
-- **Un `403` puede ser «capacidad no configurada», no un fallo.** Un repositorio
-  con Dependabot deshabilitado responde `403` con
-  `{"message":"Dependabot alerts are disabled for this repository."}`; se
-  clasifica como `GithubError::Disabled` (por el cuerpo) y no aborta el escaneo.
-  Un `403` de límite sigue trayendo `Retry-After` y se trata distinto.
-- **Un `404` puede significar «no configurado».** `code-scanning/alerts`
-  responde `404` con `{"message":"no analysis found"}` cuando no hay CodeQL; se
-  clasifica como `GithubError::NotConfigured`, no como error.
-
-## Metodología
-
-El proyecto se construye con dos puertas de calidad y una disciplina de ramas:
-
-- **SDD con OpenSpec.** No se escribe código ni tests nuevos antes de que exista
-  y esté aprobado un *change* en `openspec/changes/`. `openspec/` es la
-  especificación viva: contratos, escenarios *Given/When/Then* y un `tasks.md`.
-- **TDD estricto.** Cada tarea se desarrolla en rojo → verde → refactor,
-  ejecutando la suite por CLI en cada paso.
-- **Sin red en los tests.** GitHub se simula con `wiremock`; la suite es
-  determinista y ejecutable sin credenciales.
-- **Auditoría independiente.** Cada fase la revisa un revisor `@rust-reviewer`
-  antes de darse por cerrada; los hallazgos se aplican también con TDD.
-- **Gitflow con gitmoji.** `main` (producción) y `development` (integración) solo
-  reciben cambios por *pull request*; el trabajo diario va en ramas `feature/*`
-  con *conventional commits* y emoji.
-
-## Roadmap
-
-- **Fase 3 · Inventario y recolección** — descubrir y filtrar los 367 repositorios
-  activos y recolectar las alertas de Dependabot, secret scanning y code scanning
-  normalizadas a un modelo único, con orquestación concurrente y progreso.
-- **Fase 4 · Persistencia e histórico** — esquema SQLite (4 tablas), *upsert*
-  idempotente, ciclo de vida de cada alerta y cálculo de deriva; subcomandos
-  `history` y `diff`.
-- **Fase 5 · Enriquecimiento OSV y priorización** — cliente OSV por lotes, mapeo
-  de ecosistemas (Dependabot → OSV), fusión sin sobreescritura y priorización
-  determinista.
-- **Fase 6 · Informes y notificación a Valet** — salida de consola, Markdown
-  (situación actual + evolución + acciones) y JSON versionado, y entrega
-  *best-effort* a Valet.
-- **Fase 7 · Operación** — unidades systemd de usuario, `justfile`, la
-  verificación de la CI (el workflow básico ya está en el repositorio; la fase
-  cubre su validación) y la verificación final contra los criterios de
-  aceptación.
-
-## Licencia
-
-MIT. Autor: **Lorenzo Carbonell** (`atareao`) · <https://atareao.es>.
-
-Consulta el texto completo en [`LICENSE`](LICENSE).
+See the full text in [`LICENSE`](LICENSE).

@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::domain::alert::{Alert, Severity};
 use crate::scan::ScanSummary;
@@ -47,7 +47,7 @@ const ECOSISTEMA_DESCONOCIDO: &str = "desconocido";
 ///
 /// `unknown` recoge tanto las alertas sin severidad como las que la fuente marcó
 /// con un valor no reconocido; nunca se pierde ninguna alerta del total.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeverityCounts {
     /// Alertas críticas.
     pub critical: u64,
@@ -86,7 +86,7 @@ impl SeverityCounts {
 }
 
 /// Alertas de un ecosistema.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EcosystemCount {
     /// Nombre del ecosistema (tal cual lo aporta la alerta).
     pub ecosystem: String,
@@ -95,7 +95,7 @@ pub struct EcosystemCount {
 }
 
 /// Alertas de un repositorio.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoCount {
     /// Nombre completo del repositorio (`owner/name`).
     pub repo: String,
@@ -104,7 +104,7 @@ pub struct RepoCount {
 }
 
 /// Acción propuesta para un paquete: la versión que corrige y su alcance.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Action {
     /// Paquete afectado.
     pub package: String,
@@ -115,7 +115,7 @@ pub struct Action {
 }
 
 /// Entrada de la serie histórica, ya con el neto calculado.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryEntry {
     /// Identificador de la ejecución.
     pub run_id: i64,
@@ -135,7 +135,7 @@ pub struct HistoryEntry {
 ///
 /// Todas las claves del JSON derivan de estos campos; el orden y el nombre son
 /// parte del contrato estable.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReportDocument {
     /// Versión del esquema del informe.
     pub schema_version: u32,
@@ -372,5 +372,73 @@ mod tests {
             resolved: 5,
         };
         assert_eq!(entrada_historica(&punto).net, -3);
+    }
+
+    /// El documento serializado se puede volver a leer sin perder ningún campo:
+    /// el JSON es la fuente de verdad que consumen `report` y `notify`.
+    #[test]
+    fn el_documento_sobrevive_a_un_viaje_por_json() {
+        let original = ReportDocument {
+            schema_version: SCHEMA_VERSION,
+            generated_at: Utc
+                .timestamp_opt(1_700_000_000, 0)
+                .single()
+                .expect("instante"),
+            run_id: 7,
+            scanned: 367,
+            failed: 2,
+            total: 1333,
+            by_severity: SeverityCounts {
+                critical: 3,
+                high: 40,
+                medium: 1290,
+                low: 0,
+                unknown: 0,
+            },
+            by_ecosystem: vec![EcosystemCount {
+                ecosystem: "pip".to_string(),
+                alerts: 1333,
+            }],
+            worst_repos: vec![RepoCount {
+                repo: "atareao/uno".to_string(),
+                alerts: 15,
+            }],
+            new: 10,
+            resolved: 2,
+            actions: vec![Action {
+                package: "django".to_string(),
+                fixed_version: Some("3.0.2".to_string()),
+                repos: 4,
+            }],
+            history: vec![HistoryEntry {
+                run_id: 7,
+                started_at: Utc
+                    .timestamp_opt(1_700_000_000, 0)
+                    .single()
+                    .expect("instante"),
+                total: 1333,
+                new: 10,
+                resolved: 2,
+                net: 8,
+            }],
+        };
+
+        let json = original.to_json().expect("serializa el documento");
+        let recuperado: ReportDocument =
+            serde_json::from_str(&json).expect("deserializa el documento");
+
+        assert_eq!(recuperado.schema_version, original.schema_version);
+        assert_eq!(recuperado.generated_at, original.generated_at);
+        assert_eq!(recuperado.run_id, original.run_id);
+        assert_eq!(recuperado.scanned, original.scanned);
+        assert_eq!(recuperado.failed, original.failed);
+        assert_eq!(recuperado.total, original.total);
+        assert_eq!(recuperado.by_severity, original.by_severity);
+        assert_eq!(recuperado.by_ecosystem, original.by_ecosystem);
+        assert_eq!(recuperado.worst_repos, original.worst_repos);
+        assert_eq!(recuperado.new, original.new);
+        assert_eq!(recuperado.resolved, original.resolved);
+        assert_eq!(recuperado.actions, original.actions);
+        assert_eq!(recuperado.history, original.history);
     }
 }

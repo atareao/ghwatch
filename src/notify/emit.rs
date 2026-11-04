@@ -63,19 +63,34 @@ pub async fn emit_and_notify(
 
     let notify = match notifier {
         None => NotifyOutcome::NotConfigured,
-        Some(cliente) => {
-            if !should_notify(document.new, document.resolved, force) {
-                tracing::debug!(
-                    "sin alertas nuevas ni resueltas: no se notifica a Valet (usa --force para forzar)"
-                );
-                NotifyOutcome::Skipped
-            } else {
-                enviar(cliente, document, &paths.markdown).await
-            }
-        }
+        Some(cliente) => send_document(cliente, document, &paths.markdown, force).await,
     };
 
     Ok(EmitOutcome { paths, notify })
+}
+
+/// Compone y envía la notificación **sin tocar el disco**.
+///
+/// Es la vía que usa `ghwatch notify`: el informe ya existe y no debe
+/// reescribirse (podría desemparejar el `.md` del `.json` o machacar un
+/// documento de otra fecha). `report_path` es la ruta que se anuncia en el
+/// mensaje; solo se usa como dato, no se abre.
+///
+/// Respeta el modo silencioso (`force`): sin novedades y sin `force` no se
+/// envía nada y se devuelve [`NotifyOutcome::Skipped`].
+pub async fn send_document(
+    client: &ValetClient,
+    document: &ReportDocument,
+    report_path: &Path,
+    force: bool,
+) -> NotifyOutcome {
+    if !should_notify(document.new, document.resolved, force) {
+        tracing::debug!(
+            "sin alertas nuevas ni resueltas: no se notifica a Valet (usa --force para forzar)"
+        );
+        return NotifyOutcome::Skipped;
+    }
+    enviar(client, document, report_path).await
 }
 
 /// Escribe el informe en un hilo bloqueante para no bloquear el runtime.

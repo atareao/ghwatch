@@ -124,9 +124,10 @@ Mapeo de `level`: hay `critical` → `critical`; si no, hay `high` → `warning`
 El informe completo **nunca** viaja en `message`: se recorta a ≤4096 bytes **por bytes UTF-8**
 (no por chars) y se referencia la ruta del informe en disco.
 
-Modo por defecto `--valet-only-on-change`: solo notifica si `new > 0` o `resolved > 0` (evita spam
-diario). `--force` para forzar el envío. Si Valet está caído: la notificación es *best-effort*, el
-informe en disco ya está escrito y el exit code del escaneo no falla por ello.
+Modo por defecto: solo notifica si `new > 0` o `resolved > 0` (evita el spam
+diario). `--force` para forzar el envío aunque no haya novedades. Si Valet está caído: la
+notificación es *best-effort*, el informe en disco ya está escrito y el exit code del escaneo no
+falla por ello.
 
 ## 6. Fases y tareas atómicas
 
@@ -169,7 +170,7 @@ informe en disco ya está escrito y el exit code del escaneo no falla por ello.
 - **T4.3** JSON estable y versionado (`schema_version: 1`) para consumo externo.
 - **T4.4** Notificador Valet según el contrato de la sección 5. Tests de límites **exactos**
   (4096 y 8192 bytes) y de truncado con multibyte (emoji, acentos) sin partir caracteres.
-- **T4.5** `--valet-only-on-change` (def.) y `--force`.
+- **T4.5** Notificación por defecto solo-si-hay-cambios (`new > 0` o `resolved > 0`) y `--force`.
 - **T4.6** Doc de integración: crear ingest key, guardar el token (`~/.config/ghwatch/config.toml`,
   permisos 600, o keyring), y curl de verificación contra `GET /api/notifications/unread`.
 

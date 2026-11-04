@@ -55,8 +55,9 @@ impl ValetSettings {
     /// Resuelve la configuración con precedencia **entorno > fichero**.
     ///
     /// Primero usa el entorno inyectado (`get`). Lo que falte se completa desde
-    /// `config_path` (TOML con `base_url` e `ingest_token`), siempre que el
-    /// fichero exista y sus permisos sean exactamente `600`. Un fichero ausente
+    /// `config_path` (TOML con `valet_base_url`/`valet_ingest_token`, o sus alias
+    /// `base_url`/`ingest_token`), siempre que el fichero exista y sus permisos
+    /// sean exactamente `600`. Un fichero ausente
     /// no es un error; uno con permisos más laxos se rechaza con un `warn!` y su
     /// token **no** se usa.
     ///
@@ -114,12 +115,17 @@ impl ValetSettings {
 
 /// Contenido del fichero de configuración (`config.toml`).
 ///
-/// Solo las claves que el notificador usa; cualquier otra se ignora.
+/// Solo las claves que el notificador usa; cualquier otra se ignora. La grafía
+/// **canónica** es la del CLI (`valet_base_url`/`valet_ingest_token`), pero se
+/// aceptan también `base_url`/`ingest_token` como alias: así el notificador y el
+/// `config.rs` del CLI interpretan el **mismo** fichero con las mismas claves.
 #[derive(Debug, Default, Deserialize)]
 struct FileConfig {
     /// URL base de Valet.
+    #[serde(alias = "valet_base_url")]
     base_url: Option<String>,
     /// Token de ingesta de Valet.
+    #[serde(alias = "valet_ingest_token")]
     ingest_token: Option<String>,
 }
 
