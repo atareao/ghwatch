@@ -93,6 +93,16 @@ pub enum GithubError {
     /// no puede contener el token.
     #[error("error de transporte con la API de GitHub: {0}")]
     Transport(String),
+
+    /// La tarea que recolectaba un repositorio falló en el runtime.
+    ///
+    /// A diferencia de [`GithubError::Transport`], **no** describe un problema
+    /// de red: cubre el pánico o la cancelación de la tarea de un repositorio
+    /// durante [`crate::scan::scan`]. Conserva el mensaje del
+    /// [`tokio::task::JoinError`] para poder diagnosticar un pánico en un
+    /// escaneo desatendido (por ejemplo, bajo systemd).
+    #[error("la tarea del repositorio falló en el runtime: {0}")]
+    TaskFailed(String),
 }
 
 impl GithubError {
@@ -114,6 +124,13 @@ impl GithubError {
     pub fn is_pagination_limit(&self) -> bool {
         matches!(self, Self::PaginationLimit { .. })
     }
+
+    /// Indica si el error proviene del fallo de la tarea de un repositorio
+    /// (pánico o cancelación), y no de un problema de red o de la API.
+    #[must_use]
+    pub fn is_task_failed(&self) -> bool {
+        matches!(self, Self::TaskFailed(_))
+    }
 }
 
 /// Indica si el cuerpo de un `403` corresponde a «capacidad deshabilitada».
@@ -124,6 +141,16 @@ impl GithubError {
 #[must_use]
 pub fn is_disabled_body(body: &str) -> bool {
     body.to_ascii_lowercase().contains(DISABLED_MARKER)
+}
+
+/// Indica si el cuerpo de un `404` corresponde a «capacidad no configurada».
+///
+/// La comparación es insensible a mayúsculas —igual que [`is_disabled_body`]—
+/// y reconoce la marca `no analysis found`. Un `404` sin esta marca sigue
+/// siendo [`GithubError::NotFound`].
+#[must_use]
+pub fn is_not_configured_body(body: &str) -> bool {
+    body.to_ascii_lowercase().contains(NOT_CONFIGURED_MARKER)
 }
 
 /// Clasifica una respuesta de la API de GitHub en un error tipado.
@@ -165,7 +192,7 @@ pub fn classify_response(
                 body: truncate_body(body),
             }),
         },
-        404 if body.contains(NOT_CONFIGURED_MARKER) => Err(GithubError::NotConfigured),
+        404 if is_not_configured_body(body) => Err(GithubError::NotConfigured),
         404 => Err(GithubError::NotFound),
         200..=299 => Ok(()),
         _ => Err(GithubError::Http {
@@ -305,6 +332,31 @@ mod tests {
         assert!(matches!(err, GithubError::NotFound));
     }
 
+    /// El marcador de «no configurado» se reconoce sin distinguir mayúsculas.
+    #[test]
+    fn is_not_configured_body_reconoce_el_marcador() {
+        assert!(is_not_configured_body(
+            "{\"message\":\"no analysis found\"}"
+        ));
+        assert!(is_not_configured_body(
+            "{\"message\":\"No Analysis Found\"}"
+        ));
+        assert!(is_not_configured_body(
+            "{\"message\":\"NO ANALYSIS FOUND\"}"
+        ));
+        assert!(!is_not_configured_body("{\"message\":\"Not Found\"}"));
+        assert!(!is_not_configured_body(""));
+    }
+
+    /// Un `404` con la marca en mayúsculas también es `NotConfigured`: la
+    /// clasificación no depende del uso de mayúsculas de GitHub.
+    #[test]
+    fn classify_response_404_marcador_en_mayusculas_es_not_configured() {
+        let err = classify_response(404, "{\"message\":\"No Analysis Found\"}", None)
+            .expect_err("404 con marca debe fallar");
+        assert!(matches!(err, GithubError::NotConfigured));
+    }
+
     /// Un `5xx` es `Http` y conserva estado y cuerpo.
     #[test]
     fn classify_response_500_es_http() {
@@ -343,5 +395,13 @@ mod tests {
     fn is_pagination_limit_solo_para_el_corte() {
         assert!(GithubError::PaginationLimit { pages: 1000 }.is_pagination_limit());
         assert!(!GithubError::NotFound.is_pagination_limit());
+    }
+
+    /// `is_task_failed` distingue el fallo de la tarea de un repositorio del
+    /// error de transporte HTTP: no se confunden un pánico y un fallo de red.
+    #[test]
+    fn is_task_failed_solo_para_el_fallo_de_tarea() {
+        assert!(GithubError::TaskFailed("pánico en la tarea".to_string()).is_task_failed());
+        assert!(!GithubError::Transport("red caída".to_string()).is_task_failed());
     }
 }

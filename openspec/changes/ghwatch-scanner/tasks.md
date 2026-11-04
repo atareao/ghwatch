@@ -57,16 +57,39 @@
 
 ## 3. Inventario y recolección
 
-- [ ] 3.1 RED — escribir el test con `wiremock` del descubrimiento de 433 repositorios repartidos en 5 páginas que debe fallar porque no existe el inventario; comando `cargo test inventory`; pegar la salida en rojo.
-- [ ] 3.2 RED — escribir el test con `wiremock` de los filtros por defecto (367 de 433) y de `--include-forks` y `--include-archived`; comando `cargo test inventory`; pegar la salida en rojo.
-- [ ] 3.3 RED — escribir el test de normalización de una alerta de Dependabot (112 en 2 páginas, sin truncar en 100) al modelo único; comando `cargo test alerts`; pegar la salida en rojo.
-- [ ] 3.4 RED — escribir el test de normalización de una alerta de secret scanning con `source = secret` y `cvss` vacío sin error; comando `cargo test alerts`; pegar la salida en rojo.
-- [ ] 3.5 RED — escribir el test con `wiremock` de code scanning `404` `no analysis found` que marca «no configurado» y no aborta; comando `cargo test alerts`; pegar la salida en rojo.
-- [ ] 3.6 RED — escribir el test con `wiremock` de Dependabot `403` que marca `disabled` y no cuenta como fallo; comando `cargo test alerts`; pegar la salida en rojo.
-- [ ] 3.7 GREEN — implementar la recolección de las tres fuentes y la normalización al modelo único; confirmar con `cargo test alerts` y `cargo check`.
-- [ ] 3.8 RED — escribir el test de orquestación con concurrencia acotada de 367 repositorios y 2 fallos transitorios que espera 365 correctos y 2 fallidos listados; comando `cargo test scan`; pegar la salida en rojo.
-- [ ] 3.9 GREEN — implementar la orquestación con concurrencia acotada y progreso con `indicatif`; confirmar con `cargo test scan` y `cargo check`.
-- [ ] 3.10 Auditoría con `@rust-reviewer` del inventario, la recolección y la orquestación.
+- [x] 3.1 RED — escribir el test con `wiremock` del descubrimiento de 433 repositorios repartidos en 5 páginas que debe fallar porque no existe el inventario; comando `cargo test inventory`; pegar la salida en rojo.
+- [x] 3.2 RED — escribir el test con `wiremock` de los filtros por defecto (367 de 433) y de `--include-forks` y `--include-archived`; comando `cargo test inventory`; pegar la salida en rojo.
+- [x] 3.3 RED — escribir el test de normalización de una alerta de Dependabot (112 en 2 páginas, sin truncar en 100) al modelo único; comando `cargo test alerts`; pegar la salida en rojo.
+- [x] 3.4 RED — escribir el test de normalización de una alerta de secret scanning con `source = secret` y `cvss` vacío sin error; comando `cargo test alerts`; pegar la salida en rojo.
+- [x] 3.5 RED — escribir el test con `wiremock` de code scanning `404` `no analysis found` que marca «no configurado» y no aborta; comando `cargo test alerts`; pegar la salida en rojo.
+- [x] 3.6 RED — escribir el test con `wiremock` de Dependabot `403` que marca `disabled` y no cuenta como fallo; comando `cargo test alerts`; pegar la salida en rojo.
+- [x] 3.7 GREEN — implementar la recolección de las tres fuentes y la normalización al modelo único; confirmar con `cargo test alerts` y `cargo check`.
+- [x] 3.8 RED — escribir el test de orquestación con concurrencia acotada de 367 repositorios y 2 fallos transitorios que espera 365 correctos y 2 fallidos listados; comando `cargo test scan`; pegar la salida en rojo.
+- [x] 3.9 GREEN — implementar la orquestación con concurrencia acotada y progreso con `indicatif`; confirmar con `cargo test scan` y `cargo check`.
+- [x] 3.10 Auditoría con `@rust-reviewer` del inventario, la recolección y la orquestación.
+
+### 3.11 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la Fase 3 (veredicto: aprobado con reservas, cero bloqueantes). Todos aplicados con TDD (rojo → verde).
+
+- [x] 3.11.1 I1 — `secret_scanning::collect` tolera el `404` que GitHub documenta para repos públicos o con la capacidad desactivada: `NotFound`, `NotConfigured` y `Disabled` se traducen a lista vacía en lugar de contabilizar un fallo. Verificación: `cargo test --test alerts secret_scanning_404` (rojo: `NotFound`).
+- [x] 3.11.2 I2 — test del `403` genérico a nivel de colector: `dependabot::collect` contra un `403` con cuerpo ajeno propaga `GithubError::Http { status: 403 }` y no lo confunde con `Disabled`. Verificación: `cargo test --test alerts dependabot_403_generico`.
+- [x] 3.11.3 M2 — la marca `no analysis found` se reconoce con la nueva función pura `is_not_configured_body` (insensible a mayúsculas), coherente con `is_disabled_body`. Verificación: `cargo test --lib is_not_configured_body` y `cargo test --lib classify_response_404_marcador` (rojo: `No Analysis Found` clasificado como `NotFound`).
+- [x] 3.11.4 M3 — comentario en `code_scanning::collect` que justifica la reutilización de `GithubError::Disabled` (mismo significado operativo: capacidad no disponible) y test del `403` deshabilitado → `configured = false`. Verificación: `cargo test --test alerts code_scanning_403_disabled`.
+- [x] 3.11.5 M5 — el paquete se resuelve campo a campo (`security_vulnerability.package.name` → `dependency.package.name` y análogo para `ecosystem`), de modo que un `name` ausente en la vulnerabilidad no oculta el de la dependencia. Verificación: `cargo test --lib dependabot::tests` (rojo: `None` en lugar de `Some("django")`).
+- [x] 3.11.6 M6 — cobertura multi-página con `Link` en secret scanning y code scanning: 2 páginas, 101 alertas, sin truncar. Verificación: `cargo test --test alerts recolecta_dos_paginas`.
+- [x] 3.11.7 M4 — la spec del modelo único enumera `secret_type`, eliminando la deriva con `src/domain/alert.rs`. Verificación: revisión de `openspec/changes/ghwatch-scanner/specs/alert-collection/spec.md`.
+
+### 3.12 Endurecimiento tras la auditoría de la orquestación
+
+> Cambios derivados de la auditoría de la orquestación (`src/scan.rs`, `tests/scan.rs`, tareas 3.8–3.9; veredicto: aprobado con reservas, cero bloqueantes). Todos aplicados con TDD (rojo → verde).
+
+- [x] 3.12.1 I1 — la salida de cada tarea viaja con su propio nombre de repositorio (`RepoOutcome`): la atribución de un fallo ya no se re-deriva por posición ni puede degradar en silencio a un nombre vacío. La ruta `Err(JoinError)`, sin identidad, se etiqueta por posición (`<repositorio #N>`), nunca vacía. Verificación: `cargo test --lib el_panico_de_una_tarea_no_deja_nombre_vacio` (rojo: `RepoOutcome` inexistente) y `cargo test --test scan escaneo_con_todos_los_repositorios_fallidos` (afirma nombre no vacío).
+- [x] 3.12.2 M1 — nueva variante `GithubError::TaskFailed(String)` con accesor `is_task_failed()`: el `JoinError` de un pánico se conserva como causa en lugar de sobrecargar `GithubError::Transport` (que significa otra cosa). Verificación: `cargo test --lib is_task_failed` (rojo: variante inexistente).
+- [x] 3.12.3 M2 — el progreso avanza en la ruta de pánico mediante `ProgresoGuard` (el `Drop` corre durante el desenrollado), no solo tras la recolección. Verificación: `cargo test --lib el_progreso_avanza_aunque_la_tarea_entre_en_panico` (rojo: `ProgresoGuard` inexistente).
+- [x] 3.12.4 M3 — `collect_repo` acepta el `Repo` por valor: la clausura ya es dueña, así que no se clona el metadato. Verificación: `cargo test --lib scan`.
+- [x] 3.12.5 M4 — `RepoScan` expone el estado de Dependabot por una sola vía (`repo.dependabot`); las alertas pasan a `dependabot_alerts`, eliminando la copia del estado que podía desincronizarse. Verificación: `cargo test --test scan escaneo_fusiona_el_estado_de_dependabot` (rojo: campo `dependabot_alerts` inexistente).
+- [x] 3.12.6 M5 — cobertura de huecos: descubrimiento vacío (0 repos → resumen vacío y `start(0)`, sin error), todos los repositorios fallan, ruta `Err(JoinError)`, y el escenario de fallos transitorios afirma además que el error es de límite (`is_rate_limited()`). Verificación: `cargo test --test scan` (rojo: `RepoOutcome`/`TaskFailed` inexistentes).
 
 ## 4. Persistencia e histórico
 
