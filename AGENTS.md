@@ -6,12 +6,13 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
 
 ## Estado actual — leer antes de tocar código
 
-- **`src/main.rs` es un stub que imprime `Hello, world!`.** No hay CLI, ni `clap`, ni SQLite,
-  ni informes. `cargo install ghwatch` **no** da un escáner.
-- Lo único implementado y auditado es la **biblioteca**: `auth` y `github`. El resto
-  (`cli`, `config`, `osv`, `store`, `domain`, `report`, `notify`, y
-  `github/{repos,dependabot,secret_scanning,code_scanning}`) está planificado en `PLAN.md`,
-  **sin escribir**.
+- **`src/main.rs` es un stub que imprime `Hello, world!`.** No hay CLI (ni `clap`) ni
+  `config.rs`. `cargo install ghwatch` **no** da un escáner.
+- Implementado y auditado (biblioteca): `auth`; `github` (cliente HTTP + recolección del
+  inventario y de las tres fuentes de alertas); `domain` (tipos puros); `scan` (orquestación
+  con concurrencia acotada); `store` (persistencia SQLite, ciclo de vida y deriva).
+- **Sin escribir todavía** (planificado en `PLAN.md`): `cli`, `config`, `osv`, `report`,
+  `notify`, y el cableado de los subcomandos `scan|report|diff|history|notify|init`.
 - No implementes módulos ni "arregles" el stub por iniciativa propia: el trabajo pasa por el
   flujo de spec (abajo).
 
@@ -25,7 +26,7 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
 2. **TDD rojo→verde→refactor**, ejecutando la suite por CLI en cada paso y registrando el rojo
    antes del verde.
 3. **Auditoría.** Cada fase la revisa `@rust-reviewer`; sus hallazgos se aplican también con
-   TDD (ver las secciones `N.9` de `tasks.md`).
+   TDD (ver las secciones `N.9`/`N.10` de `tasks.md`).
 4. **Idioma.** `openspec/config.yaml` fija `Language: es`: los artefactos se escriben en
    español; los encabezados estructurales y `SHALL`/`MUST` se mantienen en inglés.
 
@@ -34,8 +35,11 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
-cargo test                          # 78 tests, sin red y sin token
+cargo test                          # 151 tests, sin red y sin token
 cargo test github                   # filtra por nombre (ver convención de tests)
+cargo test store                    # persistencia e histórico
+cargo test drift                    # clasificación de deriva
+cargo test history                  # series y diff
 cargo test github::paginacion_sigue # un solo test
 cargo test auth::token_redacta
 ```
@@ -53,6 +57,9 @@ cargo test auth::token_redacta
   `RecordingSleeper`, que registra duraciones sin dormir. Constructor:
   `GithubClient::with_sleeper`.
 - Crear tokens en tests con `Token::new("…")` (único constructor; sin `From<String>` público).
+- Persistencia: tests con SQLite **en memoria** (`sqlite::memory:`, `max_connections(1)`); las
+  migraciones se embeben con `include_str!` y se aplican en runtime (feature `migrate` de
+  sqlx), **sin `DATABASE_URL`** ni macros `query!`.
 
 ## Invariantes y trampas ya resueltas (no reintroducir)
 
@@ -71,6 +78,12 @@ cargo test auth::token_redacta
   anti-fuga: no los debilites.
 - El semáforo de concurrencia solo actúa vía `for_each_concurrent`; si lanzas peticiones por
   tu cuenta, usa `limiter()`.
+- **La deriva es un conjunto cerrado** `{new, still_open, resolved, reopened, severity_up}`.
+  `resolved_at` es no nulo si y solo si `state = resolved`; `reopened` no es `new`; `severity_up`
+  solo sube. El `diff` es **histórico** (lee la instantánea del evento, no el estado actual).
+- **No se resuelven alertas de una fuente no observable** (Dependabot `disabled`, code/secret
+  scanning sin capacidad): su ausencia es «no se pudo mirar», no «ya no está».
+- **`store` depende de `domain`, nunca al revés**; `domain` es puro (sin IO/red/BD).
 
 ## Credenciales y entorno
 
