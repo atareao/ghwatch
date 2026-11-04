@@ -406,6 +406,181 @@ mod alerts {
         );
     }
 
+    // --- 5.8 Endurecimiento tras la auditoría de la fase 5 ---
+
+    /// I1 — Una fecha `created_at` ilegible **no** aborta la recolección de
+    /// Dependabot: la alerta se normaliza con `created_at = None` y el resto de
+    /// sus campos intactos, en lugar de perder la respuesta completa.
+    #[tokio::test]
+    async fn dependabot_tolera_una_fecha_ilegible() {
+        let server = MockServer::start().await;
+
+        let mut crudo = alerta_dependabot(1);
+        crudo["created_at"] = serde_json::json!("no es una fecha");
+
+        Mock::given(method("GET"))
+            .and(path("/repos/atareao/reto-python/dependabot/alerts"))
+            .and(query_param("state", "open"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([crudo])))
+            .mount(&server)
+            .await;
+
+        let client = cliente(&server);
+        let report = dependabot::collect(&client, "atareao/reto-python")
+            .await
+            .expect("una fecha ilegible no debe abortar la recolección");
+
+        assert_eq!(report.alerts.len(), 1, "la alerta no se pierde");
+        let alerta = &report.alerts[0];
+        assert!(
+            alerta.created_at.is_none(),
+            "una fecha ilegible se normaliza a `None`"
+        );
+        assert_eq!(
+            alerta.package.as_deref(),
+            Some("django"),
+            "el resto de campos queda intacto"
+        );
+        assert_eq!(alerta.severity, Some(Severity::High));
+        assert_eq!(alerta.cvss, Some(7.5));
+    }
+
+    /// I4 — Una fecha `created_at` válida se normaliza en secret scanning.
+    #[tokio::test]
+    async fn secret_scanning_normaliza_created_at() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/atareao/reto-python/secret-scanning/alerts"))
+            .and(query_param("state", "open"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "number": 7,
+                    "created_at": "2026-10-01T00:00:00Z",
+                    "secret_type": "adafruit_io_key",
+                    "secret_type_display_name": "Adafruit IO Key"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = cliente(&server);
+        let report = secret_scanning::collect(&client, "atareao/reto-python")
+            .await
+            .expect("la recolección debería completarse");
+
+        assert_eq!(
+            report.alerts[0].created_at,
+            Some(
+                "2026-10-01T00:00:00Z"
+                    .parse::<chrono::DateTime<chrono::Utc>>()
+                    .expect("instante válido")
+            ),
+            "la fecha de creación se normaliza"
+        );
+    }
+
+    /// I1/I4 — Una fecha `created_at` ilegible no aborta secret scanning.
+    #[tokio::test]
+    async fn secret_scanning_tolera_una_fecha_ilegible() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/atareao/reto-python/secret-scanning/alerts"))
+            .and(query_param("state", "open"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "number": 7,
+                    "created_at": "no es una fecha",
+                    "secret_type": "adafruit_io_key",
+                    "secret_type_display_name": "Adafruit IO Key"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = cliente(&server);
+        let report = secret_scanning::collect(&client, "atareao/reto-python")
+            .await
+            .expect("una fecha ilegible no debe abortar la recolección");
+
+        assert_eq!(report.alerts.len(), 1, "la alerta no se pierde");
+        assert!(report.alerts[0].created_at.is_none());
+        assert_eq!(
+            report.alerts[0].secret_type.as_deref(),
+            Some("adafruit_io_key"),
+            "el resto de campos queda intacto"
+        );
+    }
+
+    /// I4 — Una fecha `created_at` válida se normaliza en code scanning.
+    #[tokio::test]
+    async fn code_scanning_normaliza_created_at() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/atareao/reto-python/code-scanning/alerts"))
+            .and(query_param("state", "open"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "number": 3,
+                    "created_at": "2026-10-02T00:00:00Z",
+                    "rule": {
+                        "description": "Uso de función insegura",
+                        "security_severity_level": "high"
+                    }
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = cliente(&server);
+        let report = code_scanning::collect(&client, "atareao/reto-python")
+            .await
+            .expect("la recolección debería completarse");
+
+        assert_eq!(
+            report.alerts[0].created_at,
+            Some(
+                "2026-10-02T00:00:00Z"
+                    .parse::<chrono::DateTime<chrono::Utc>>()
+                    .expect("instante válido")
+            ),
+            "la fecha de creación se normaliza"
+        );
+    }
+
+    /// I1/I4 — Una fecha `created_at` ilegible no aborta code scanning.
+    #[tokio::test]
+    async fn code_scanning_tolera_una_fecha_ilegible() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/atareao/reto-python/code-scanning/alerts"))
+            .and(query_param("state", "open"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "number": 3,
+                    "created_at": "no es una fecha",
+                    "rule": {
+                        "description": "Uso de función insegura",
+                        "security_severity_level": "high"
+                    }
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = cliente(&server);
+        let report = code_scanning::collect(&client, "atareao/reto-python")
+            .await
+            .expect("una fecha ilegible no debe abortar la recolección");
+
+        assert_eq!(report.alerts.len(), 1, "la alerta no se pierde");
+        assert!(report.alerts[0].created_at.is_none());
+        assert_eq!(report.alerts[0].severity, Some(Severity::High));
+    }
+
     /// M3 — El `403` de capacidad deshabilitada reutilizado por code scanning
     /// se traduce a `configured = false` sin abortar.
     #[tokio::test]

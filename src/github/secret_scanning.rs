@@ -15,6 +15,7 @@ use serde::Deserialize;
 use crate::domain::alert::{Alert, AlertSource};
 
 use super::client::GithubClient;
+use super::datetime::parse_rfc3339;
 use super::error::GithubError;
 
 /// Resultado de consultar las alertas de secret scanning de un repositorio.
@@ -67,6 +68,11 @@ pub async fn collect(
 struct RawAlert {
     /// Número de la alerta dentro del repositorio.
     number: u64,
+    /// Instante de creación tal y como lo publica GitHub, sin interpretar.
+    ///
+    /// Se normaliza aparte para que una fecha ilegible no aborte la recolección.
+    #[serde(default)]
+    created_at: Option<String>,
     #[serde(default)]
     secret_type: Option<String>,
     #[serde(default)]
@@ -91,6 +97,7 @@ impl RawAlert {
             vulnerable_range: None,
             first_patched: None,
             secret_type: self.secret_type,
+            created_at: parse_rfc3339(self.created_at.as_deref()),
         }
     }
 }
@@ -104,6 +111,7 @@ mod tests {
     fn normaliza_un_secreto_sin_cvss() {
         let crudo = RawAlert {
             number: 7,
+            created_at: None,
             secret_type: Some("adafruit_io_key".to_string()),
             secret_type_display_name: Some("Adafruit IO Key".to_string()),
         };

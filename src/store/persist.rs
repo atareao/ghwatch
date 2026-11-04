@@ -254,8 +254,9 @@ async fn persist_alert(
             sqlx::query(
                 "UPDATE alerts SET ghsa_id = ?1, cve_id = ?2, severity = ?3, cvss = ?4, \
                  summary = ?5, package = ?6, ecosystem = ?7, manifest_path = ?8, scope = ?9, \
-                 vulnerable_range = ?10, first_patched = ?11, secret_type = ?12, state = 'open', \
-                 last_seen_run = ?13, resolved_at = NULL WHERE id = ?14",
+                 vulnerable_range = ?10, first_patched = ?11, secret_type = ?12, \
+                 created_at = ?13, state = 'open', \
+                 last_seen_run = ?14, resolved_at = NULL WHERE id = ?15",
             )
             .bind(alert.ghsa_id.as_deref())
             .bind(alert.cve_id.as_deref())
@@ -269,6 +270,7 @@ async fn persist_alert(
             .bind(alert.vulnerable_range.as_deref())
             .bind(alert.first_patched.as_deref())
             .bind(alert.secret_type.as_deref())
+            .bind(alert.created_at.map(|instante| instante.to_rfc3339()))
             .bind(run_id)
             .bind(id)
             .execute(&mut **tx)
@@ -281,9 +283,9 @@ async fn persist_alert(
                 "INSERT INTO alerts \
                  (repo, source, external_id, ghsa_id, cve_id, severity, cvss, summary, package, \
                   ecosystem, manifest_path, scope, vulnerable_range, first_patched, secret_type, \
-                  state, first_seen_run, last_seen_run, resolved_at) \
+                  created_at, state, first_seen_run, last_seen_run, resolved_at) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
-                  'open', ?16, ?16, NULL)",
+                  ?16, 'open', ?17, ?17, NULL)",
             )
             .bind(repo)
             .bind(alert.source.as_str())
@@ -300,6 +302,7 @@ async fn persist_alert(
             .bind(alert.vulnerable_range.as_deref())
             .bind(alert.first_patched.as_deref())
             .bind(alert.secret_type.as_deref())
+            .bind(alert.created_at.map(|instante| instante.to_rfc3339()))
             .bind(run_id)
             .execute(&mut **tx)
             .await?;

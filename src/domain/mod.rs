@@ -9,11 +9,13 @@
 //! ([`AlertSource`]) y severidad ([`Severity`]), y el metadato de identidad de
 //! un repositorio ([`Repo`]) con su estado de Dependabot ([`DependabotState`]).
 //! Añade las piezas puras del ciclo de vida —el estado almacenado
-//! ([`AlertState`]) y la categoría de deriva ([`Drift`])— y la instantánea de
-//! una ejecución ([`ScanRun`]).
+//! ([`AlertState`]) y la categoría de deriva ([`Drift`])—, la instantánea de
+//! una ejecución ([`ScanRun`]) y la priorización determinista
+//! ([`priority`]).
 
 pub mod alert;
 pub mod drift;
+pub mod priority;
 pub mod repo;
 pub mod run;
 

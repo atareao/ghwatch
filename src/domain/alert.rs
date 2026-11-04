@@ -5,6 +5,7 @@
 //! que una fuente no aporta quedan a `None`: por ejemplo, el `cvss` de una
 //! alerta de secreto o el `secret_type` de una alerta de Dependabot.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Origen de una alerta.
@@ -114,7 +115,9 @@ impl Severity {
 /// Alerta normalizada, con independencia de su origen.
 ///
 /// Los campos que una fuente no aporta quedan a `None`. `cvss` es la única
-/// magnitud numérica y por eso se guarda como `Option<f64>`.
+/// magnitud numérica y por eso se guarda como `Option<f64>`. `created_at` es el
+/// instante de creación según la fuente: GitHub lo publica para las tres, y lo
+/// consume la priorización por antigüedad.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Alert {
     /// Fuente de la alerta.
@@ -145,6 +148,8 @@ pub struct Alert {
     pub first_patched: Option<String>,
     /// Tipo de secreto expuesto (solo en alertas de secret scanning).
     pub secret_type: Option<String>,
+    /// Instante de creación de la alerta según la fuente, si consta.
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 #[cfg(test)]

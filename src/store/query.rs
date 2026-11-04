@@ -25,6 +25,7 @@ type FilaAlmacenada = (
     i64,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 /// Fila de la serie histórica: `(run_id, started_at, total, new, resolved)`.
@@ -56,6 +57,8 @@ pub struct StoredAlert {
     pub resolved_at: Option<DateTime<Utc>>,
     /// Tipo de secreto expuesto, si la fuente lo aporta (secret scanning).
     pub secret_type: Option<String>,
+    /// Instante de creación de la alerta según la fuente, si consta.
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 /// Evento de deriva asociado a una ejecución.
@@ -108,7 +111,7 @@ impl Store {
     pub async fn alerts(&self) -> Result<Vec<StoredAlert>, StoreError> {
         let filas: Vec<FilaAlmacenada> = sqlx::query_as(
             "SELECT id, repo, source, external_id, severity, state, first_seen_run, \
-             last_seen_run, resolved_at, secret_type FROM alerts \
+             last_seen_run, resolved_at, secret_type, created_at FROM alerts \
              ORDER BY repo, source, external_id",
         )
         .fetch_all(self.pool())
@@ -125,7 +128,7 @@ impl Store {
     pub async fn alerts_for_repo(&self, repo: &str) -> Result<Vec<StoredAlert>, StoreError> {
         let filas: Vec<FilaAlmacenada> = sqlx::query_as(
             "SELECT id, repo, source, external_id, severity, state, first_seen_run, \
-             last_seen_run, resolved_at, secret_type FROM alerts \
+             last_seen_run, resolved_at, secret_type, created_at FROM alerts \
              WHERE repo = ?1 ORDER BY source, external_id",
         )
         .bind(repo)
@@ -265,7 +268,7 @@ impl Store {
     ) -> Result<Vec<StoredAlert>, StoreError> {
         let filas: Vec<FilaAlmacenada> = sqlx::query_as(
             "SELECT a.id, a.repo, a.source, a.external_id, a.severity, e.state, \
-             a.first_seen_run, a.last_seen_run, e.resolved_at, a.secret_type \
+             a.first_seen_run, a.last_seen_run, e.resolved_at, a.secret_type, a.created_at \
              FROM alert_events e JOIN alerts a ON a.id = e.alert_id \
              WHERE e.run_id = ?1 AND e.change = ?2 ORDER BY a.repo, a.source, a.external_id",
         )
@@ -291,6 +294,7 @@ fn fila_a_alerta(fila: FilaAlmacenada) -> Result<StoredAlert, StoreError> {
         last_seen_run,
         resolved_at,
         secret_type,
+        created_at,
     ) = fila;
 
     Ok(StoredAlert {
@@ -309,6 +313,10 @@ fn fila_a_alerta(fila: FilaAlmacenada) -> Result<StoredAlert, StoreError> {
             .map(|valor| parse_instante(valor, "resolved_at"))
             .transpose()?,
         secret_type,
+        created_at: created_at
+            .as_deref()
+            .map(|valor| parse_instante(valor, "created_at"))
+            .transpose()?,
     })
 }
 
