@@ -73,11 +73,17 @@ pub fn score(alert: &Alert, now: DateTime<Utc>) -> f64 {
 
 /// Ordena las alertas por prioridad descendente, con desempate total.
 ///
-/// Devuelve referencias a las alertas en el orden resultante, que es idéntico
-/// para los mismos datos con independencia del orden de entrada.
+/// Acepta cualquier iterador de referencias a alertas (por ejemplo `&[Alert]` o
+/// el resultado de filtrar `alerts.iter()`), de modo que quien ya trabaja con
+/// referencias —como la tabla de consola— no necesita clonar. Devuelve
+/// referencias a las alertas en el orden resultante, que es idéntico para los
+/// mismos datos con independencia del orden de entrada.
 #[must_use]
-pub fn prioritize(alerts: &[Alert], now: DateTime<Utc>) -> Vec<&Alert> {
-    let mut ordenadas: Vec<&Alert> = alerts.iter().collect();
+pub fn prioritize<'a, I>(alerts: I, now: DateTime<Utc>) -> Vec<&'a Alert>
+where
+    I: IntoIterator<Item = &'a Alert>,
+{
+    let mut ordenadas: Vec<&Alert> = alerts.into_iter().collect();
     ordenadas.sort_by(|a, b| comparar(a, b, now));
     ordenadas
 }

@@ -8,7 +8,7 @@ Entrega del resumen del escaneo a Valet mediante su API de ingesta ya existente.
 
 ### Requirement: El envío SHALL usar la API de ingesta de Valet
 
-El envío SHALL realizarse con `POST {VALET_BASE_URL}/api/notifications`, con `Authorization: Bearer <token de ingesta>` y `Content-Type: application/json`, y SHALL esperar una respuesta `201` con el identificador de la notificación.
+El envío SHALL realizarse con `POST {VALET_BASE_URL}/api/notifications`, con `Authorization: Bearer <token de ingesta>` y `Content-Type: application/json`, y SHALL esperar una respuesta `201` con el identificador de la notificación. Las redirecciones SHALL NOT seguirse: un `3xx` SHALL tratarse como estado anómalo, no como éxito.
 
 #### Scenario: Envío con token válido
 
@@ -16,6 +16,13 @@ El envío SHALL realizarse con `POST {VALET_BASE_URL}/api/notifications`, con `A
 - **When** se envía el resumen
 - **Then** Valet responde `201` con un identificador
 - **And** la notificación es visible en su bandeja
+
+#### Scenario: Redirección no seguida
+
+- **Given** Valet responde `302` con una cabecera `Location`
+- **When** se envía el resumen
+- **Then** la redirección no se sigue
+- **And** el estado `3xx` se trata como error de estado
 
 #### Scenario: Token revocado
 
@@ -27,7 +34,7 @@ El envío SHALL realizarse con `POST {VALET_BASE_URL}/api/notifications`, con `A
 
 ### Requirement: El mensaje SHALL respetar el límite de bytes del campo `message`
 
-El campo `message` SHALL tener como máximo 4096 bytes tras `trim` y SHALL NOT quedar vacío. El recorte SHALL hacerse por límite de bytes UTF-8 y SHALL NOT partir un carácter multibyte.
+El campo `message` SHALL tener como máximo 4096 bytes tras `trim` y SHALL NOT quedar vacío. El recorte SHALL hacerse por límite de bytes UTF-8 y SHALL NOT partir un carácter multibyte. Cuando el resumen exceda el límite, el `message` SHALL aprovechar el presupuesto completo hasta el límite exacto (sin dejar bytes sin usar por un desajuste de cálculo) y SHALL conservar la ruta del informe.
 
 #### Scenario: Resumen que excede el límite
 
@@ -48,6 +55,13 @@ El campo `message` SHALL tener como máximo 4096 bytes tras `trim` y SHALL NOT q
 - **Given** un resumen enviado a Valet
 - **When** se compone el mensaje
 - **Then** el mensaje incluye la ruta del informe completo en disco
+
+#### Scenario: Presupuesto del mensaje aprovechado al completo
+
+- **Given** un cuerpo ASCII saturado y una ruta de informe
+- **When** se recorta el mensaje
+- **Then** el `message` mide exactamente 4096 bytes
+- **And** sigue llevando la ruta del informe
 
 ### Requirement: El metadato SHALL ser un objeto JSON dentro de su límite
 
@@ -114,13 +128,34 @@ La notificación es best-effort: SHALL NOT alterar el código de salida del esca
 
 ### Requirement: La configuración SHALL mantener el token fuera de los registros
 
-`VALET_BASE_URL` (por defecto `http://localhost:3000`) y `VALET_INGEST_TOKEN` SHALL leerse del entorno o de `~/.config/ghwatch/config.toml`, que SHALL tener permisos `600`. El token SHALL NOT aparecer en la salida estándar, en los logs ni en el JSON.
+`VALET_BASE_URL` (por defecto `http://localhost:3000`) y `VALET_INGEST_TOKEN` SHALL resolverse del entorno primero y, solo para lo que el entorno no aporte, de `~/.config/ghwatch/config.toml`. El entorno SHALL tener precedencia sobre el fichero. El fichero SHALL tener permisos `600`; uno más laxo SHALL rechazarse con un aviso y su contenido SHALL NOT usarse. Un fichero ausente o con TOML inválido SHALL ignorarse sin propagar error. El token SHALL NOT aparecer en la salida estándar, en los logs ni en el JSON.
+
+#### Scenario: El entorno tiene precedencia sobre el fichero
+
+- **Given** un `VALET_BASE_URL` en el entorno y otro distinto en el fichero
+- **When** se resuelve la configuración
+- **Then** se usa el valor del entorno
+
+#### Scenario: El fichero completa lo que falta del entorno
+
+- **Given** el entorno define la URL pero no el token, y el fichero define ambos
+- **When** se resuelve la configuración
+- **Then** la URL viene del entorno
+- **And** el token viene del fichero
+
+#### Scenario: Fichero de configuración ausente
+
+- **Given** que el fichero de configuración no existe
+- **When** se resuelve la configuración
+- **Then** no se propaga error
+- **And** se usan los valores por defecto
 
 #### Scenario: Permisos de configuración demasiado laxos
 
 - **Given** el fichero de configuración con permisos más laxos que `600`
 - **When** se carga
 - **Then** se advierte y se rechaza su uso
+- **And** ni su URL ni su token se usan
 
 #### Scenario: Registro de un envío fallido
 
