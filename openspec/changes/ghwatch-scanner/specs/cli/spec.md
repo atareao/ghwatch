@@ -84,9 +84,9 @@ Ni la salida estándar, ni el registro, ni los informes SHALL contener el token 
 - **When** se repite `ghwatch scan` sin que haya cambiado nada
 - **Then** el resumen informa de 0 nuevas y 0 resueltas
 
-### Requirement: Los subcomandos de consulta SHALL leer solo de la base de datos local
+### Requirement: Los subcomandos de consulta SHALL leer solo del almacenamiento local
 
-`report`, `diff` y `history` SHALL leer únicamente de la base de datos local y SHALL NOT realizar peticiones a GitHub, a OSV ni a Valet.
+`report`, `diff` y `history` SHALL leer únicamente de almacenamiento local —la base de datos y los ficheros de informe— y SHALL NOT realizar peticiones a GitHub, a OSV ni a Valet. `notify` SHALL poder enviar a Valet el informe ya escrito, que es su propósito, pero nunca vuelve a escanear ni contacta con GitHub ni con OSV.
 
 #### Scenario: Consulta sin credenciales
 
