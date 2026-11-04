@@ -174,12 +174,26 @@
 - [x] 6.13.10 M8 — actualizar `AGENTS.md` con el estado real de la Fase 6 (hoy describe `report` y `notify` como «sin escribir todavía»). Hecho por el director del proyecto: `AGENTS.md` describe ya `report` y `notify` como implementados, el recuento de tests (244) y las invariantes nuevas (informe antes de notificar, límites en bytes, config con permisos `600`, `rebuild_interest_cache` en tests de logs).
 - [x] 6.13.11 Verificación final: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` y `cargo test` (244 tests) en verde, más el bucle de 20 ejecuciones de `cargo test --test notify` (20/20, 0 fallos) que confirma que el test de logs ya no es flaky.
 
-## 7. Operación
+## 7. CLI y operación
 
-- [ ] 7.1 GREEN — crear las unidades systemd de usuario (`ghwatch.service` y `ghwatch.timer`) con `Persistent=true`; verificar con `systemd-analyze verify`.
-- [ ] 7.2 GREEN — crear el `justfile` con las recetas de build, test, lint y escaneo; verificar ejecutando `just --list`.
-- [ ] 7.3 GREEN — redactar `README.md` y `README.es.md`; verificar revisando cobertura de uso, configuración y operación.
-- [ ] 7.4 GREEN — configurar la CI con `cargo fmt --check`, `cargo clippy -- -D warnings` y `cargo test`; verificar con `cargo fmt --check && cargo clippy -- -D warnings && cargo test`.
-- [ ] 7.5 GREEN — preparar el flujo gitflow: rama `development`, una rama `feature/*` por fase y commits gitmoji, con PR a `development` (nunca commit directo a `main` ni `development`); verificar con `git branch --show-current` y la revisión de los PRs.
-- [ ] 7.6 Auditoría con `@rust-reviewer` de la operación y del repositorio completo.
-- [ ] 7.7 Verificación final contra los criterios de aceptación del `PLAN.md`: cubrir 367 repositorios en menos de 15 minutos, detectar las ≈1.333 alertas, idempotencia confirmada, informe con evolución, notificación visible en Valet, `clippy -- -D warnings` limpio y tests verdes sin red.
+### 7.A CLI (spec `cli`)
+
+- [ ] 7.1 RED — escribir el test de `cli::parse` (clap) que exige los seis subcomandos y sus flags, y el error de uso (código 2) ante un subcomando desconocido; comando `cargo test cli`; pegar la salida en rojo.
+- [ ] 7.2 RED — escribir el test de precedencia de configuración (flags > entorno > fichero > defecto) y de rechazo del fichero con permisos distintos de `600` (con aviso y sin usarlo), con `tempfile` y un entorno inyectable; comando `cargo test config`; pegar la salida en rojo.
+- [ ] 7.3 RED — escribir el test de los códigos de salida: éxito `0` (incluidos Valet no responde y «sin novedades»), uso `2`, sin token `3`, fallo fatal de GitHub `4` y de la base de datos `5`; comando `cargo test cli`; pegar la salida en rojo.
+- [ ] 7.4 RED — escribir el test de `ghwatch scan` de extremo a extremo con `wiremock` (GitHub + OSV + Valet) y SQLite en un directorio temporal: el informe queda escrito, la notificación es best-effort y el código de salida es 0; comando `cargo test cli`; pegar la salida en rojo.
+- [ ] 7.5 RED — escribir el test de idempotencia por CLI (dos `scan` idénticos → 0 nuevas y 0 resueltas) y el de `--include-forks`/`--include-archived`; comando `cargo test cli`; pegar la salida en rojo.
+- [ ] 7.6 RED — escribir los tests de los subcomandos de consulta sin red (`report`, `diff`, `history`, `notify`) y de `--quiet`/`-v`, más el test anti-fuga de que ni el token de GitHub ni el de ingesta aparecen en la salida verbosa; comando `cargo test cli`; pegar la salida en rojo.
+- [ ] 7.7 GREEN — implementar `cli.rs` (clap derive), `config.rs` (precedencia y permisos) y `main.rs` (inicialización de `tracing`, `IndicatifReporter`/`HiddenReporter` y mapeo de errores a códigos de salida) con el cableado de `scan|report|diff|history|notify`; confirmar con `cargo test cli config` y `cargo run -- --help`.
+- [ ] 7.8 GREEN — implementar `ghwatch init` (plantilla de `~/.config/ghwatch/config.toml` con permisos `600` y base de datos migrada, sin sobrescribir la existente); confirmar con `cargo test cli` y una ejecución real en un directorio temporal.
+- [ ] 7.9 Auditoría con `@rust-reviewer` del CLI, la configuración y los códigos de salida.
+
+### 7.B Operación
+
+- [ ] 7.10 GREEN — crear las unidades systemd de usuario (`ghwatch.service` y `ghwatch.timer`) con `Persistent=true`; verificar con `systemd-analyze verify`.
+- [ ] 7.11 GREEN — crear el `justfile` con las recetas de build, test, lint, escaneo e `install-timer`; verificar ejecutando `just --list`.
+- [ ] 7.12 GREEN — redactar `README.md` y `README.es.md` (uso, configuración, operación y creación de la ingest key de Valet); verificar revisando cobertura de uso, configuración y operación.
+- [ ] 7.13 GREEN — revisar la CI existente (`.github/workflows/ci.yml`) y ampliarla si procede (por ejemplo `openspec validate --strict`); verificar con `cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test`.
+- [ ] 7.14 GREEN — verificar el flujo gitflow (rama `development`, una `feature/*` por fase, commits gitmoji y PR a `development`, nunca commit directo a `main` ni `development`); verificar con `git branch --show-current` y la revisión de los PRs #2–#7.
+- [ ] 7.15 Auditoría con `@rust-reviewer` de la operación y del repositorio completo.
+- [ ] 7.16 Verificación final contra los criterios de aceptación del `PLAN.md` §8: cubrir 367 repositorios en menos de 15 minutos, detectar las ≈1.333 alertas, idempotencia confirmada, informe con evolución, notificación visible en Valet, `clippy -- -D warnings` limpio y tests verdes sin red.
