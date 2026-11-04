@@ -35,6 +35,14 @@ Un `403` (alertas deshabilitadas) o un `404` con `no analysis found` SHALL NOT a
 - **Then** el repositorio se marca con Dependabot `disabled`
 - **And** la respuesta no cuenta como fallo del escaneo
 
+#### Scenario: Secret scanning no observable
+
+- **Given** un repositorio cuya consulta de secret scanning responde `404` (público o capacidad no disponible)
+- **When** se recolectan sus alertas
+- **Then** el informe marca la fuente como no observable
+- **And** la lista de alertas queda vacía sin contar como fallo
+- **And** una alerta de secreto que dejó de observarse no se declara resuelta
+
 ### Requirement: El cliente SHALL respetar el límite de peticiones de la API
 
 El cliente SHALL leer `X-RateLimit-Remaining` y `X-RateLimit-Reset`, y SHALL pausar antes de agotar la cuota. Ante un `403` de límite secundario, SHALL reintentar respetando `Retry-After` con retroceso exponencial y SHALL acotar la concurrencia de peticiones.

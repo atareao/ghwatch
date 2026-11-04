@@ -5,7 +5,10 @@
 //! `cvss`, `package` ni identificadores GHSA/CVE: esos campos quedan a `None`
 //! sin que ello sea un error. Un `404` (repo público o capacidad no disponible),
 //! un `404` con `no analysis found` y un `403` de capacidad deshabilitada se
-//! toleran como lista vacía: no son fallos del escaneo.
+//! toleran como lista vacía: no son fallos del escaneo, pero **sí** marcan la
+//! fuente como **no observable** (el informe [`SecretScanningReport`] lleva esa
+//! marca) para que la persistencia no declare resueltos secretos que solo
+//! dejaron de poder observarse.
 
 use serde::Deserialize;
 
@@ -14,6 +17,18 @@ use crate::domain::alert::{Alert, AlertSource};
 use super::client::GithubClient;
 use super::error::GithubError;
 
+/// Resultado de consultar las alertas de secret scanning de un repositorio.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SecretScanningReport {
+    /// Si la fuente estaba disponible para observarse en el repositorio.
+    ///
+    /// `false` cuando la API respondió `404`/`403`/`no analysis found`: la lista
+    /// vacía entonces significa «no se pudo mirar», no «no hay secretos».
+    pub observable: bool,
+    /// Alertas normalizadas; vacío si la fuente no estaba observable.
+    pub alerts: Vec<Alert>,
+}
+
 /// Recolecta y normaliza las alertas abiertas de secret scanning.
 ///
 /// # Errores
@@ -21,20 +36,27 @@ use super::error::GithubError;
 /// Propaga el [`GithubError`] de cualquier página salvo cuando la capacidad no
 /// está disponible en el repositorio: [`GithubError::NotFound`] (un `404`
 /// genérico, p. ej. un repo público), [`GithubError::NotConfigured`] y
-/// [`GithubError::Disabled`] se traducen a lista vacía. GitHub documenta el
-/// `404` para `GET /repos/{owner}/{repo}/secret-scanning/alerts` cuando el
-/// repositorio es público o la capacidad está desactivada, así que no debe
-/// contabilizarse como fallo.
+/// [`GithubError::Disabled`] se traducen a un informe con `observable = false` y
+/// lista vacía. GitHub documenta el `404` para
+/// `GET /repos/{owner}/{repo}/secret-scanning/alerts` cuando el repositorio es
+/// público o la capacidad está desactivada, así que no debe contabilizarse como
+/// fallo.
 pub async fn collect(
     client: &GithubClient,
     name_with_owner: &str,
-) -> Result<Vec<Alert>, GithubError> {
+) -> Result<SecretScanningReport, GithubError> {
     let path = format!("/repos/{name_with_owner}/secret-scanning/alerts?state=open");
 
     match client.get_paginated::<RawAlert>(&path).await {
-        Ok(crudas) => Ok(crudas.into_iter().map(RawAlert::normalize).collect()),
+        Ok(crudas) => Ok(SecretScanningReport {
+            observable: true,
+            alerts: crudas.into_iter().map(RawAlert::normalize).collect(),
+        }),
         Err(GithubError::NotFound | GithubError::NotConfigured | GithubError::Disabled) => {
-            Ok(Vec::new())
+            Ok(SecretScanningReport {
+                observable: false,
+                alerts: Vec::new(),
+            })
         }
         Err(otro) => Err(otro),
     }

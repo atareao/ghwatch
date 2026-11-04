@@ -93,15 +93,28 @@
 
 ## 4. Persistencia e histórico
 
-- [ ] 4.1 RED — escribir el test de migración que espera las 4 tablas (`repos`, `scan_runs`, `alerts`, `alert_events`) con la clave única `(source, repo, external_id)` y que debe fallar porque no hay migraciones; comando `cargo test store`; pegar la salida en rojo.
-- [ ] 4.2 GREEN — implementar las migraciones y los repositorios de datos sobre sqlx; confirmar con `cargo test store` y `cargo check`.
-- [ ] 4.3 RED — escribir el test de idempotencia (dos escaneos idénticos → 0 nuevas, 0 resueltas, `first_seen_run` intacto) que debe fallar; comando `cargo test store`; pegar la salida en rojo.
-- [ ] 4.4 RED — escribir el test del ciclo de vida (`first_seen_run`, `last_seen_run`, `resolved_at`) que debe fallar; comando `cargo test store`; pegar la salida en rojo.
-- [ ] 4.5 RED — escribir los tests de clasificación de deriva (`new`, `still_open`, `resolved`, `reopened`, `severity_up`) que deben fallar; comando `cargo test drift`; pegar la salida en rojo.
-- [ ] 4.6 GREEN — implementar el ciclo de vida y el cálculo de deriva; confirmar con `cargo test store drift` y `cargo check`.
-- [ ] 4.7 RED — escribir los tests de `history` (serie por ejecución) y `diff` (nuevas y resueltas separadas) que deben fallar; comando `cargo test history`; pegar la salida en rojo.
-- [ ] 4.8 GREEN — implementar los subcomandos `history` y `diff`; confirmar con `cargo test history` y `cargo check`.
-- [ ] 4.9 Auditoría con `@rust-reviewer` de la persistencia, la deriva y el histórico.
+- [x] 4.1 RED — escribir el test de migración que espera las 4 tablas (`repos`, `scan_runs`, `alerts`, `alert_events`) con la clave única `(source, repo, external_id)` y que debe fallar porque no hay migraciones; comando `cargo test store`; pegar la salida en rojo.
+- [x] 4.2 GREEN — implementar las migraciones y los repositorios de datos sobre sqlx; confirmar con `cargo test store` y `cargo check`.
+- [x] 4.3 RED — escribir el test de idempotencia (dos escaneos idénticos → 0 nuevas, 0 resueltas, `first_seen_run` intacto) que debe fallar; comando `cargo test store`; pegar la salida en rojo.
+- [x] 4.4 RED — escribir el test del ciclo de vida (`first_seen_run`, `last_seen_run`, `resolved_at`) que debe fallar; comando `cargo test store`; pegar la salida en rojo.
+- [x] 4.5 RED — escribir los tests de clasificación de deriva (`new`, `still_open`, `resolved`, `reopened`, `severity_up`) que deben fallar; comando `cargo test drift`; pegar la salida en rojo.
+- [x] 4.6 GREEN — implementar el ciclo de vida y el cálculo de deriva; confirmar con `cargo test store drift` y `cargo check`.
+- [x] 4.7 RED — escribir los tests de `history` (serie por ejecución) y `diff` (nuevas y resueltas separadas) que deben fallar; comando `cargo test history`; pegar la salida en rojo. En `tests/history.rs` (módulo `history`), con SQLite en memoria: serie de cinco ejecuciones (fecha/total/nuevas/resueltas por run), diff con nuevas y resueltas separadas, y los límites «sin ejecuciones → sin diff» y «run sin cambios → 0/0». Rojo real: `error[E0599]: no method named 'latest_diff' found for struct 'Store'` (la spec del CLI pide `diff` como «cambios desde el último run»; `history` y `diff(run_id)` ya existían de 4.6).
+- [x] 4.8 GREEN — implementar los subcomandos `history` y `diff`; confirmar con `cargo test history` y `cargo check`. `Store::latest_diff()` (variante sin argumentos: `latest_run_id` + `diff`, `None` sin histórico) sobre la serie `Store::history()` y la primitiva `Store::diff(run_id)` ya existentes. Verde: `cargo test history` (4 tests) y `cargo test` (144 tests). El cableado del subcomando en el CLI queda para la Fase 7.
+- [x] 4.9 Auditoría con `@rust-reviewer` de la persistencia, la deriva y el histórico.
+
+### 4.10 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la Fase 4 (veredicto: aprobado con reservas, cero bloqueantes). Todos aplicados con TDD (rojo → verde).
+
+- [x] 4.10.1 I1 — `secret_type` se persiste y se recupera: nueva columna `secret_type TEXT` en `alerts`, vinculada en el INSERT/UPDATE de `persist.rs` y expuesta en `StoredAlert` (`secret_type`). `PLAN.md` §4 actualizado. Verificación: `cargo test --test store una_alerta_de_secreto_persiste` (rojo: `E0609: no field secret_type on type StoredAlert`).
+- [x] 4.10.2 I2 — observabilidad de secret scanning: `secret_scanning::collect` devuelve `SecretScanningReport { observable, alerts }` (`observable = false` para `404`/`403`/`NotConfigured`), se propaga hasta `RepoScan.secrets` y `fuente_observada` la usa en lugar de `true` fijo. Verificación: `cargo test --test alerts secret_scanning_404_marca_la_fuente_no_observable` (rojo: `E0432: no SecretScanningReport` y `E0609: no field observable`) y `cargo test --test store no_se_resuelven_secretos` (un `404` sigue sin contar como fallo).
+- [x] 4.10.3 I3 — el diff es **histórico** (opción b): `alert_events` guarda la instantánea `state`/`resolved_at` del evento y `alerts_de_evento` los lee del evento, no de la fila actual. Verificación: `cargo test --test history el_diff_de_un_run_no_cambia_al_reabrir` (rojo: `left: Open, right: Resolved`).
+- [x] 4.10.4 M1 — índices que faltan: `idx_alerts_state` y el compuesto `idx_alert_events_run_change`. Verificación: `cargo test --test store las_migraciones_crean_los_indices` (rojo: falta `idx_alerts_state`).
+- [x] 4.10.5 M3 — limitación conocida documentada (doc de `persist_scan`/`resolver_desaparecidas`, `PLAN.md` §4 y spec `alert-history`): las alertas de repositorios que salen del inventario no se resuelven.
+- [x] 4.10.6 M5 — cobertura: mismo `external_id` en dos fuentes del mismo repo (`el_mismo_external_id_en_dos_fuentes`), reapertura posterior al run consultado (`el_diff_de_un_run_no_cambia_al_reabrir`), alerta resuelta ausente varios runs sin alterar `resolved_at` (`una_alerta_resuelta_ausente_conserva_su_resolved_at`) y aserción explícita de `severity_up == 0` en un escaneo repetido.
+- [x] 4.10.7 M6 — `Eq` derivado en `Diff` y `StoredAlert`, coherente con `HistoryPoint`/`ScanRun`.
+- [x] 4.10.8 Verificación final: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` y `cargo test` (151 tests) en verde.
 
 ## 5. Enriquecimiento OSV y priorización
 

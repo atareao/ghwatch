@@ -81,3 +81,26 @@ El CLI SHALL exponer el subcomando `history` para series por ejecución y el sub
 - **When** se invoca `diff`
 - **Then** se listan las alertas nuevas
 - **And** se listan las alertas resueltas por separado
+
+### Requirement: El diff SHALL ser histórico e independiente del estado actual
+
+El diff de una ejecución SHALL reflejar el ciclo de vida (`state` y `resolved_at`) que cada alerta tenía **en esa ejecución**, no su estado actual, de modo que el resultado de `diff(run_id)` no cambie por reaperturas posteriores.
+
+#### Scenario: Alerta resuelta y reabierta después del run consultado
+
+- **Given** una alerta presente en el run 1, resuelta en el run 2 y reabierta en el run 3
+- **When** se consulta `diff` del run 2
+- **Then** la alerta aparece entre las resueltas
+- **And** su `resolved_at` es el del run 2
+- **And** el estado **actual** de la alerta es abierto
+
+### Requirement: La resolución SHALL exigir que la fuente sea observable
+
+Solo las alertas de repositorios escaneados con éxito y cuya fuente era observable SHALL poder declararse resueltas. Una fuente no observable (Dependabot deshabilitado, secret scanning con `404`/`403` o sin configurar, code scanning sin análisis) SHALL NOT producir falsos `resolved`. Las alertas de repositorios ausentes del inventario SHALL NOT resolverse: no se observan (limitación conocida).
+
+#### Scenario: Secret scanning deja de ser observable
+
+- **Given** una alerta de secreto abierta y un escaneo posterior en el que secret scanning responde `404`
+- **When** se persiste el escaneo
+- **Then** la alerta permanece abierta
+- **And** no se contabiliza como resuelta

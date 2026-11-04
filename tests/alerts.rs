@@ -139,12 +139,13 @@ mod alerts {
             .await;
 
         let client = cliente(&server);
-        let alertas = secret_scanning::collect(&client, "atareao/reto-python")
+        let report = secret_scanning::collect(&client, "atareao/reto-python")
             .await
             .expect("la recolección debería completarse");
 
-        assert_eq!(alertas.len(), 1);
-        let alerta = &alertas[0];
+        assert!(report.observable, "un 200 marca la fuente como observable");
+        assert_eq!(report.alerts.len(), 1);
+        let alerta = &report.alerts[0];
         assert_eq!(alerta.source, AlertSource::Secret);
         assert_eq!(alerta.external_id, "7");
         assert_eq!(alerta.secret_type.as_deref(), Some("adafruit_io_key"));
@@ -250,11 +251,43 @@ mod alerts {
             .await;
 
         let client = cliente(&server);
-        let alertas = secret_scanning::collect(&client, "atareao/reto-python")
+        let report = secret_scanning::collect(&client, "atareao/reto-python")
             .await
             .expect("un 404 no debe contabilizarse como fallo");
 
-        assert!(alertas.is_empty(), "un 404 debe traducirse a lista vacía");
+        assert!(
+            report.alerts.is_empty(),
+            "un 404 debe traducirse a lista vacía"
+        );
+    }
+
+    /// I2 — Un `404`/`403` de secret scanning deja la fuente **no observable**:
+    /// el informe lo marca para que la persistencia no declare resueltos secretos
+    /// que solo dejaron de poder observarse.
+    #[tokio::test]
+    async fn secret_scanning_404_marca_la_fuente_no_observable() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/atareao/reto-python/secret-scanning/alerts"))
+            .and(query_param("state", "open"))
+            .respond_with(
+                ResponseTemplate::new(404)
+                    .set_body_json(serde_json::json!({ "message": "Not Found" })),
+            )
+            .mount(&server)
+            .await;
+
+        let client = cliente(&server);
+        let report = secret_scanning::collect(&client, "atareao/reto-python")
+            .await
+            .expect("un 404 no debe contabilizarse como fallo");
+
+        assert!(
+            !report.observable,
+            "un 404 marca la fuente como no observable"
+        );
+        assert!(report.alerts.is_empty(), "un 404 se traduce a lista vacía");
     }
 
     /// I2 — Un `403` con un cuerpo ajeno al literal de capacidad deshabilitada
@@ -316,11 +349,15 @@ mod alerts {
             .await;
 
         let client = cliente(&server);
-        let alertas = secret_scanning::collect(&client, "atareao/reto-python")
+        let report = secret_scanning::collect(&client, "atareao/reto-python")
             .await
             .expect("la recolección debería completarse");
 
-        assert_eq!(alertas.len(), 101, "no debe truncarse en la primera página");
+        assert_eq!(
+            report.alerts.len(),
+            101,
+            "no debe truncarse en la primera página"
+        );
     }
 
     /// M6 — Una colección de code scanning de 2 páginas encadenadas por `Link`

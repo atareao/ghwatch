@@ -40,6 +40,32 @@ pub enum Severity {
     Unknown,
 }
 
+impl AlertSource {
+    /// Representación textual estable, en `snake_case`.
+    ///
+    /// Coincide con la serialización de `serde` y con el valor almacenado en la
+    /// base de datos.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Dependabot => "dependabot",
+            Self::Secret => "secret",
+            Self::Code => "code",
+        }
+    }
+
+    /// Interpreta la representación textual; `None` si no se reconoce.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "dependabot" => Some(Self::Dependabot),
+            "secret" => Some(Self::Secret),
+            "code" => Some(Self::Code),
+            _ => None,
+        }
+    }
+}
+
 impl Severity {
     /// Interpreta la etiqueta de severidad que devuelve GitHub.
     ///
@@ -54,6 +80,33 @@ impl Severity {
             "medium" | "warning" => Self::Medium,
             "low" | "note" => Self::Low,
             _ => Self::Unknown,
+        }
+    }
+
+    /// Orden relativo de la severidad, de menor a mayor.
+    ///
+    /// [`Severity::Unknown`] vale cero, de modo que pasar de una severidad
+    /// desconocida a una conocida cuenta como subida.
+    #[must_use]
+    pub const fn rank(self) -> u8 {
+        match self {
+            Self::Critical => 4,
+            Self::High => 3,
+            Self::Medium => 2,
+            Self::Low => 1,
+            Self::Unknown => 0,
+        }
+    }
+
+    /// Representación textual estable, en `snake_case`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Critical => "critical",
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
+            Self::Unknown => "unknown",
         }
     }
 }
