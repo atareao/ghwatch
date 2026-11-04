@@ -11,7 +11,7 @@ permissions:
 
 # Nota: la validación de la especificación OpenSpec NO se ejecuta en esta CI.
 # El CLI de `openspec` es un paquete de Node y ataría la CI a npm; la validación
-# queda como receta local: `just validate` (`openspec validate ghwatch-scanner
+# queda como receta local: `just validate` (`openspec validate --specs
 # --strict`). Tampoco se añaden dependencias frágiles: todo lo que corre aquí
 # son subcomandos de Cargo con `--locked`.
 

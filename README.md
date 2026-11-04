@@ -250,7 +250,7 @@ just report --format markdown
 just check         # fmt-check + clippy + tests
 just build-release # cargo build --release --locked
 just install-timer # copy the units and enable the timer
-just validate      # openspec validate ghwatch-scanner --strict
+just validate      # openspec validate --specs --strict
 ```
 
 The CLI recipes run `cargo run --release -- …` by default; after `just install`

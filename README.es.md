@@ -252,7 +252,7 @@ just report --format markdown
 just check         # fmt-check + clippy + tests
 just build-release # cargo build --release --locked
 just install-timer # copia las unidades y activa el timer
-just validate      # openspec validate ghwatch-scanner --strict
+just validate      # openspec validate --specs --strict
 ```
 
 Las recetas de CLI ejecutan `cargo run --release -- …` por defecto; tras

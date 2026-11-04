@@ -27,10 +27,12 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
 ## Flujo obligatorio (SDD + TDD)
 
 1. **Spec primero.** No se escribe código ni test nuevo antes de que exista y esté aprobado un
-   change en `openspec/changes/<feature>/`. El change activo es `ghwatch-scanner`
-   (`proposal.md`, `design.md`, `specs/<capability>/spec.md`, `tasks.md`).
-   `tasks.md` §0 es un **punto de parada**: ninguna casilla de las fases posteriores se marca
-   sin aprobación explícita del usuario sobre proposal + specs + design + tasks.
+   change en `openspec/changes/<feature>/`. Las 7 capacidades del proyecto ya están **archivadas**
+   en `openspec/specs/` (comprobación: `openspec validate --specs --strict`); cualquier trabajo
+   nuevo empieza creando un change en `openspec/changes/<feature>/` (`proposal.md`, `design.md`,
+   `specs/<capability>/spec.md`, `tasks.md`) con **aprobación explícita del usuario** antes de
+   escribir código o tests: ninguna casilla de las fases posteriores de `tasks.md` se marca sin
+   esa aprobación sobre proposal + specs + design + tasks.
 2. **TDD rojo→verde→refactor**, ejecutando la suite por CLI en cada paso y registrando el rojo
    antes del verde.
 3. **Auditoría.** Cada fase la revisa `@rust-reviewer`; sus hallazgos se aplican también con
