@@ -9,10 +9,11 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
 - **`src/main.rs` es un stub que imprime `Hello, world!`.** No hay CLI (ni `clap`) ni
   `config.rs`. `cargo install ghwatch` **no** da un escáner.
 - Implementado y auditado (biblioteca): `auth`; `github` (cliente HTTP + recolección del
-  inventario y de las tres fuentes de alertas); `domain` (tipos puros); `scan` (orquestación
-  con concurrencia acotada); `store` (persistencia SQLite, ciclo de vida y deriva).
-- **Sin escribir todavía** (planificado en `PLAN.md`): `cli`, `config`, `osv`, `report`,
-  `notify`, y el cableado de los subcomandos `scan|report|diff|history|notify|init`.
+  inventario y de las tres fuentes de alertas); `domain` (tipos puros, con `priority`);
+  `scan` (orquestación con concurrencia acotada); `store` (persistencia SQLite, ciclo de vida
+  y deriva); `osv` (enriquecimiento best-effort por lotes contra OSV.dev).
+- **Sin escribir todavía** (planificado en `PLAN.md`): `cli`, `config`, `report`, `notify`, y el
+  cableado de los subcomandos `scan|report|diff|history|notify|init`.
 - No implementes módulos ni "arregles" el stub por iniciativa propia: el trabajo pasa por el
   flujo de spec (abajo).
 
@@ -35,11 +36,13 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
-cargo test                          # 151 tests, sin red y sin token
+cargo test                          # 199 tests, sin red y sin token
 cargo test github                   # filtra por nombre (ver convención de tests)
 cargo test store                    # persistencia e histórico
 cargo test drift                    # clasificación de deriva
 cargo test history                  # series y diff
+cargo test osv                      # enriquecimiento OSV por lotes
+cargo test priority                 # priorización determinista
 cargo test github::paginacion_sigue # un solo test
 cargo test auth::token_redacta
 ```
@@ -84,6 +87,16 @@ cargo test auth::token_redacta
 - **No se resuelven alertas de una fuente no observable** (Dependabot `disabled`, code/secret
   scanning sin capacidad): su ausencia es «no se pudo mirar», no «ya no está».
 - **`store` depende de `domain`, nunca al revés**; `domain` es puro (sin IO/red/BD).
+- **OSV nunca sobreescribe a GitHub.** El enriquecimiento solo completa lo que GitHub no aporta
+  (`cvss == 0` cuenta como ausente); los lotes son de ≤1000 consultas y el fallo de OSV **no**
+  aborta el escaneo (best-effort con `warn!`). El mapeo de ecosistemas es una tabla cerrada de
+  9 entradas; un ecosistema sin equivalencia se omite con `debug!`, sin error.
+- **La fecha cruda se normaliza, no se deserializa.** `github::datetime::parse_rfc3339` convierte
+  `created_at` (guardado como `Option<String>`) y devuelve `None` si no es RFC 3339 legible: una
+  fecha corrupta no debe tumbar la recolección completa del repositorio.
+- **La priorización es un orden total y reproducible**: puntúa por severidad, CVSS, versión
+  corregida, ámbito (runtime > development) y antigüedad, con desempate hasta el último campo y
+  `now` inyectable. No depende del orden de entrada.
 
 ## Credenciales y entorno
 
