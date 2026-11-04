@@ -11,9 +11,11 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
 - Implementado y auditado (biblioteca): `auth`; `github` (cliente HTTP + recolección del
   inventario y de las tres fuentes de alertas); `domain` (tipos puros, con `priority`);
   `scan` (orquestación con concurrencia acotada); `store` (persistencia SQLite, ciclo de vida
-  y deriva); `osv` (enriquecimiento best-effort por lotes contra OSV.dev).
-- **Sin escribir todavía** (planificado en `PLAN.md`): `cli`, `config`, `report`, `notify`, y el
-  cableado de los subcomandos `scan|report|diff|history|notify|init`.
+  y deriva); `osv` (enriquecimiento best-effort por lotes contra OSV.dev); `report` (consola,
+  Markdown y JSON, sin red); `notify` (notificador Valet best-effort + coordinación informe/envío).
+- **Sin escribir todavía** (planificado en `PLAN.md`): `cli`, `config` (la config de ejecución del
+  CLI; `notify::config` ya resuelve la de Valet) y el cableado de los subcomandos
+  `scan|report|diff|history|notify|init`.
 - No implementes módulos ni "arregles" el stub por iniciativa propia: el trabajo pasa por el
   flujo de spec (abajo).
 
@@ -36,13 +38,15 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
-cargo test                          # 199 tests, sin red y sin token
+cargo test                          # 244 tests, sin red y sin token
 cargo test github                   # filtra por nombre (ver convención de tests)
 cargo test store                    # persistencia e histórico
 cargo test drift                    # clasificación de deriva
 cargo test history                  # series y diff
 cargo test osv                      # enriquecimiento OSV por lotes
 cargo test priority                 # priorización determinista
+cargo test report                   # consola, Markdown y JSON
+cargo test notify                   # notificador Valet y límites en bytes
 cargo test github::paginacion_sigue # un solo test
 cargo test auth::token_redacta
 ```
@@ -97,6 +101,16 @@ cargo test auth::token_redacta
 - **La priorización es un orden total y reproducible**: puntúa por severidad, CVSS, versión
   corregida, ámbito (runtime > development) y antigüedad, con desempate hasta el último campo y
   `now` inyectable. No depende del orden de entrada.
+- **El informe se escribe SIEMPRE antes de notificar.** `notify::emit_and_notify` escribe Markdown
+  y JSON y **después** notifica; un fallo de Valet es best-effort (no altera el exit code ni deja
+  el informe a medias). `report` no hace red: la dependencia es unidireccional `notify → report`.
+- **Los límites de Valet son en bytes, no en caracteres**: `message` ≤4096 B tras `trim` (recorte
+  por frontera UTF-8, nunca parte un multibyte) y `metadata` ≤8192 B (reducción que jamás produce
+  `400`). Un `401` aborta sin reintentar. El token de ingesta **nunca** sale por log/stdout/JSON.
+- **La config de Valet exige permisos `600`**: precedencia **entorno > fichero**
+  (`~/.config/ghwatch/config.toml`); un fichero más laxo se rechaza con aviso y **no se usa**.
+- **Un test de logs con `tracing` no es fiable sin `rebuild_interest_cache()`** y sin serializar los
+  tests que comparten callsite: el interés se cachea globalmente y el evento puede no emitirse.
 
 ## Credenciales y entorno
 
