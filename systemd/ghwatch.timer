@@ -1,0 +1,35 @@
+# ghwatch.timer — dispara `ghwatch.service` una vez al día.
+#
+# Es un timer de **usuario**: se activa con `systemctl --user` y corre con tu
+# identidad. El trabajo pesado vive en `ghwatch.service`; aquí solo se decide
+# cuándo ejecutarlo.
+#
+# Instalación (junto con el service):
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/ghwatch.service systemd/ghwatch.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now ghwatch.timer
+#   loginctl enable-linger "$USER"
+#
+# Comprobación:
+#
+#   systemctl --user list-timers ghwatch.timer
+#   journalctl --user -u ghwatch
+
+[Unit]
+Description=ghwatch: escaneo diario de vulnerabilidades en GitHub
+
+[Timer]
+# Todos los días a las 07:00 en la hora local de la máquina.
+OnCalendar=*-*-* 07:00:00
+# Si el equipo estaba apagado a las 07:00, ejecuta el escaneo en cuanto arranque.
+Persistent=true
+# Reparte la ejecución en una ventana de 15 minutos para no coincidir con otros
+# trabajos programados a la misma hora.
+RandomizedDelaySec=15min
+# Precisión del temporizador: un minuto es de sobra para una tarea diaria.
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
