@@ -64,9 +64,9 @@ init *ARGS:
 help:
     {{bin}} --help
 
-# Valida la especificación OpenSpec del change activo.
+# Valida las especificaciones OpenSpec archivadas (`openspec/specs/`).
 validate:
-    openspec validate ghwatch-scanner --strict
+    openspec validate --specs --strict
 
 # Instala el timer y el service de usuario de systemd.
 install-timer:

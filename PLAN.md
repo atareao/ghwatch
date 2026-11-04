@@ -186,7 +186,8 @@ falla por ello.
 ## 7. Puertas de calidad (obligatorias)
 
 1. **OpenSpec (SDD)**: crear el change `ghwatch-scanner` con `proposal.md`, deltas de spec
-   (contratos + escenarios Given/When/Then) y `tasks.md`. **STOP: no se escribe código de
+   (contratos + escenarios Given/When/Then) y `tasks.md` (histórico: el change se completó y se
+   archivó el 2026-11-04; sus specs viven en `openspec/specs/`). **STOP: no se escribe código de
    aplicación ni tests nuevos hasta que el usuario apruebe la spec.**
 2. **TDD**: rojo → verde → refactor. Los tests se escriben antes que la implementación y se
    ejecutan por CLI (`cargo test`).
