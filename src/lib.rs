@@ -13,9 +13,12 @@
 //! persiste el histórico en SQLite y calcula la deriva entre ejecuciones; el
 //! módulo [`report`], que presenta el estado actual y la evolución en consola,
 //! Markdown y JSON; y el módulo [`notify`], que entrega el resumen a Valet de
-//! forma best-effort.
+//! forma best-effort. El módulo [`config`] resuelve la configuración de
+//! ejecución y [`cli`] expone los subcomandos y su orquestación.
 
 pub mod auth;
+pub mod cli;
+pub mod config;
 pub mod domain;
 pub mod github;
 pub mod notify;

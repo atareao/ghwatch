@@ -28,7 +28,7 @@ pub use config::{
     DEFAULT_BASE_URL, ENV_BASE_URL, ENV_INGEST_TOKEN, ValetSettings, check_permissions,
     default_config_path,
 };
-pub use emit::{EmitOutcome, NotifyOutcome, emit_and_notify};
+pub use emit::{EmitOutcome, NotifyOutcome, emit_and_notify, send_document};
 pub use message::{
     MESSAGE_LIMIT, METADATA_LIMIT, NotifyLevel, ValetNotification, build_notification, level_for,
     should_notify, truncate_utf8,

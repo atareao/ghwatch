@@ -38,6 +38,12 @@ use serde::{Deserialize, Serialize};
 use super::cvss;
 use super::model::{OsvAdvisory, OsvQuery};
 
+/// URL base por defecto de OSV.dev.
+///
+/// Fuente única de verdad: la reutiliza la configuración del CLI
+/// ([`crate::config`]) en lugar de repetir el literal.
+pub const DEFAULT_BASE_URL: &str = "https://api.osv.dev";
+
 /// Configuración del cliente OSV.
 #[derive(Debug, Clone)]
 pub struct OsvConfig {
@@ -52,7 +58,7 @@ pub struct OsvConfig {
 impl Default for OsvConfig {
     fn default() -> Self {
         Self {
-            base_url: "https://api.osv.dev".to_string(),
+            base_url: DEFAULT_BASE_URL.to_string(),
             batch_size: 1000,
             timeout: Duration::from_secs(30),
         }

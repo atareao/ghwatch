@@ -19,7 +19,7 @@ pub mod ecosystem;
 pub mod enrich;
 pub mod model;
 
-pub use client::{OsvClient, OsvConfig, OsvError};
+pub use client::{DEFAULT_BASE_URL as DEFAULT_OSV_BASE_URL, OsvClient, OsvConfig, OsvError};
 pub use ecosystem::map_ecosystem;
 pub use enrich::{EnrichmentOutcome, apply_advisory, query_for_alert};
 pub use model::{OsvAdvisory, OsvQuery};
