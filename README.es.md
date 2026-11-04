@@ -194,13 +194,12 @@ ghwatch scan --force  # notifica aunque no haya novedades
 ghwatch notify        # reenvía el último informe, sin escanear
 ```
 
-Por defecto la notificación sigue la regla **solo-si-hay-cambios** (el modo
-`--valet-only-on-change`): se envía solo si `new > 0` o `resolved > 0` (evita el
-mensaje diario de «no ha pasado nada»). `--force` salta esa regla. Un fallo de
-Valet es *best-effort*: nunca altera el código de salida y el informe en disco ya
-está escrito. El `message` se recorta a 4096 bytes (por frontera UTF-8, sin
-partir caracteres) y el `metadata` a 8192 bytes, siempre referenciando la ruta
-del informe.
+Por defecto la notificación sigue la regla **solo-si-hay-cambios**: se envía solo
+si `new > 0` o `resolved > 0` (evita el mensaje diario de «no ha pasado nada»).
+`--force` fuerza el envío saltándose esa regla. Un fallo de Valet es *best-effort*:
+nunca altera el código de salida y el informe en disco ya está escrito. El
+`message` se recorta a 4096 bytes (por frontera UTF-8, sin partir caracteres) y el
+`metadata` a 8192 bytes, siempre referenciando la ruta del informe.
 
 **Verifica** que la notificación llegó con el buzón (requiere sesión OIDC):
 
