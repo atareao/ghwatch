@@ -1,0 +1,95 @@
+name: Release
+
+# Se dispara al empujar un tag `vX.Y.Z` (creado a mano en `main` tras el merge
+# del PR de release, ver GIT_FLOW.md). El workflow SOLO construye los binarios
+# y publica la GitHub Release a partir del tag: la preparación del release
+# (bump con `vampus` + `CHANGELOG.md` con `git-cliff` + commit) se hace en
+# local sobre la rama `release/*`.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+# Los dos targets se compilan de forma nativa, sin `cross`: cada runner ya es
+# de la arquitectura destino, así que no hace falta instalar el target ni
+# emulación. No se necesitan paquetes del sistema: `reqwest` usa `rustls` (sin
+# OpenSSL) y `sqlx`/SQLite se compilan embebidos (`libsqlite3-sys` bundled).
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Compilar (release)
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Empaquetar
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/${{ matrix.target }}/release/ghwatch"
+          archive="ghwatch-${{ matrix.target }}.tar.gz"
+          cp "${bin}" ghwatch
+          tar czf "${archive}" ghwatch
+
+      - name: Subir artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghwatch-${{ matrix.target }}
+          path: ghwatch-${{ matrix.target }}.tar.gz
+
+  release:
+    name: Publicar GitHub Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ghwatch-*
+          merge-multiple: true
+
+      - name: Generar cuerpo con la tabla de descargas
+        run: |
+          {
+            echo "## ghwatch"
+            echo
+            echo "### Descargas"
+            echo
+            echo "| Arquitectura | Fichero |"
+            echo "|---|---|"
+            for f in *.tar.gz; do
+              [ -f "$f" ] || continue
+              arch="${f#ghwatch-}"
+              arch="${arch%.tar.gz}"
+              echo "| \`${arch}\` | \`${f}\` |"
+            done
+          } > notes.md
+
+      - name: Crear release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ghwatch ${{ github.ref_name }}
+          body_path: notes.md
+          files: "*.tar.gz"
+          generate_release_notes: true
+
+  # Nota: NO hay job `publish` a crates.io. El crate `ghwatch` no está
+  # publicado y el repositorio no tiene configurado `CARGO_REGISTRY_TOKEN`;
+  # añadirlo aquí solo haría fallar el workflow. Si algún día se publica,
+  # se añadiría un job `publish` con `cargo publish` y ese secreto.

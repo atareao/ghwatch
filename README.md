@@ -21,15 +21,17 @@ Requires a recent toolchain for **Rust edition 2024** (Rust 1.85 or newer) and a
 GitHub token with the classic **`repo`** scope.
 
 ```bash
-# From a local checkout
-cargo install --path .
+# From a local checkout (installs into ~/.local/bin, where the systemd unit
+# expects it)
+cargo install --path . --locked --root "$HOME/.local"
 
 # Straight from git
-cargo install --git https://github.com/atareao/ghwatch
+cargo install --git https://github.com/atareao/ghwatch --locked --root "$HOME/.local"
 ```
 
-`cargo install` drops the binary in `~/.cargo/bin/ghwatch`. You can also just run
-it from the source tree with `cargo run --release -- <subcommand>`.
+Without `--root`, `cargo install` drops the binary in `~/.cargo/bin/ghwatch`; if
+you prefer that, adjust `ExecStart` in `ghwatch.service` accordingly. You can also
+run it from the source tree with `cargo run --release -- <subcommand>`.
 
 ## Quick start
 
@@ -288,7 +290,8 @@ The project is built with two quality gates and an audit loop:
 - **Independent audit** — each phase is reviewed before it is considered closed,
   and the findings are applied with tests too.
 - **Gitflow with gitmoji** — `main` and `development` only receive changes
-  through pull requests; day-to-day work happens on `feature/*` branches.
+  through pull requests; day-to-day work happens on `feature/*` branches. See
+  [`GIT_FLOW.md`](GIT_FLOW.md) for branches, commits and the release flow.
 
 ## Architecture
 

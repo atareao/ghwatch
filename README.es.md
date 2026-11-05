@@ -21,15 +21,17 @@ Necesitas una cadena de herramientas reciente para **Rust edición 2024** (Rust
 1.85 o posterior) y un token de GitHub con el scope clásico **`repo`**.
 
 ```bash
-# Desde una copia local
-cargo install --path .
+# Desde una copia local (instala en ~/.local/bin, donde lo espera el unit de
+# systemd)
+cargo install --path . --locked --root "$HOME/.local"
 
 # Directamente desde git
-cargo install --git https://github.com/atareao/ghwatch
+cargo install --git https://github.com/atareao/ghwatch --locked --root "$HOME/.local"
 ```
 
-`cargo install` deja el binario en `~/.cargo/bin/ghwatch`. También puedes
-ejecutarlo desde el árbol de fuentes con `cargo run --release -- <subcomando>`.
+Sin `--root`, `cargo install` deja el binario en `~/.cargo/bin/ghwatch`; si lo
+prefieres así, ajusta `ExecStart` en `ghwatch.service` en consecuencia. También
+puedes ejecutarlo desde el árbol de fuentes con `cargo run --release -- <subcomando>`.
 
 ## Inicio rápido
 
@@ -292,7 +294,8 @@ El proyecto se construye con dos puertas de calidad y una disciplina de auditor�
 - **Auditoría independiente** — cada fase se revisa antes de darse por cerrada, y
   los hallazgos se aplican también con tests.
 - **Gitflow con gitmoji** — `main` y `development` solo reciben cambios por
-  *pull request*; el trabajo diario va en ramas `feature/*`.
+  *pull request*; el trabajo diario va en ramas `feature/*`. Consulta
+  [`GIT_FLOW.md`](GIT_FLOW.md) para las ramas, los commits y el flujo de release.
 
 ## Arquitectura
 
