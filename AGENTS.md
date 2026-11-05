@@ -11,7 +11,8 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
   `scan|report|diff|history|notify|init` y `src/config.rs` resuelve la configuración con
   precedencia **flags > entorno > fichero > defecto**. Códigos de salida: `0` éxito, `2` uso,
   `3` sin credencial de GitHub, `4` fallo de la API de GitHub y `5` fallo local (base de datos,
-  informe o E/S). `cargo install ghwatch` da el escáner real.
+  informe o E/S). `cargo install --path . --locked --root "$HOME/.local"` (o `just install`)
+  instala el escáner real en `~/.local/bin/ghwatch`, que es lo que espera el unit de systemd.
 - Implementado y auditado: `auth`; `github` (cliente HTTP + recolección del inventario y de las
   tres fuentes de alertas); `domain` (tipos puros, con `priority`); `scan` (orquestación con
   concurrencia acotada); `store` (persistencia SQLite, ciclo de vida y deriva); `osv`
@@ -129,6 +130,15 @@ cargo test auth::token_redacta
   ejecución vive en `~/.config/ghwatch/config.toml`).
 - Contrato con Valet: `POST {VALET_BASE_URL}/api/notifications` con ingest key Bearer;
   spec en `/data/rust/valet/docs/api-notifications.md` y en `PLAN.md` §5.
+
+## Git Flow
+
+Este proyecto sigue Git Flow estricto. Consulta [`GIT_FLOW.md`](GIT_FLOW.md) para:
+
+- La estructura de ramas (`main`, `development`, `feature/*`, `hotfix/*`, `release/*`).
+- Los *conventional commits* con gitmoji y la tabla de bumps.
+- Cómo crear features, hotfixes y releases (bump con `vampus`, changelog con `git-cliff`,
+  tag en `main` que dispara `release.yml` y sincronización de `development`).
 
 ## Ramas y commits
 

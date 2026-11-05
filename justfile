@@ -82,6 +82,33 @@ uninstall-timer:
     rm -f "$HOME/.config/systemd/user/ghwatch.service" "$HOME/.config/systemd/user/ghwatch.timer"
     -systemctl --user daemon-reload
 
-# Instala el binario en `~/.cargo/bin`.
+# Instala el binario en `~/.local/bin` (lo que espera el unit de systemd).
 install:
-    cargo install --path .
+    cargo install --path . --locked --root "$HOME/.local"
+
+# ── Releases (ver GIT_FLOW.md) ──────────────────────────────────
+# El release se prepara en local: bump con `vampus`, changelog con `git-cliff`
+# y commit de release. El push del tag se hace tras mergear a `main`.
+
+# Sube la versión con vampus (`just bump --minor`, `--patch` o `--major`).
+bump *ARGS:
+    vampus upgrade {{ARGS}}
+
+# Muestra la versión actual declarada en `.vampus.yml`/`Cargo.toml`.
+version:
+    vampus show
+
+# Genera `CHANGELOG.md` con lo aún no publicado (sin cerrar versión).
+changelog:
+    git-cliff -o CHANGELOG.md
+
+# Genera `CHANGELOG.md` cerrando la versión `VERSION` (p. ej. `v0.2.0`).
+changelog-tag VERSION:
+    git-cliff -o CHANGELOG.md --tag {{VERSION}}
+
+# Prepara la release: rama `release/VERSION`, changelog y commit (sin push ni tag).
+release-prepare VERSION:
+    git checkout -b release/{{VERSION}}
+    git-cliff -o CHANGELOG.md --tag {{VERSION}}
+    git add Cargo.toml Cargo.lock .vampus.yml CHANGELOG.md
+    git commit -m "🔧 chore(release): {{VERSION}}"

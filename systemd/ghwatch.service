@@ -23,10 +23,12 @@
 #   journalctl --user -u ghwatch
 #
 # Si el binario no está en `~/.local/bin/ghwatch`, ajusta `ExecStart` a su ruta
-# real; por ejemplo, tras `cargo install --path .` suele quedar en
-# `~/.cargo/bin/ghwatch`:
+# real. La instalación recomendada lo deja justo ahí:
 #
-#   ExecStart=%h/.cargo/bin/ghwatch scan
+#   cargo install --path . --locked --root "$HOME/.local"
+#
+# (sin `--root`, `cargo install` lo deja en `~/.cargo/bin/ghwatch`; en ese caso
+# ajusta `ExecStart` a `%h/.cargo/bin/ghwatch scan`).
 
 [Unit]
 Description=ghwatch: vigilancia de vulnerabilidades en los repositorios de GitHub
