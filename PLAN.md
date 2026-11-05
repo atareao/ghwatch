@@ -83,10 +83,16 @@ Principio: `domain` es puro y testeable sin red ni BD; el resto depende de él, 
 - `repos(id, name_with_owner, private, archived, fork, language, pushed_at, alerts_enabled, last_scanned_at)`
 - `scan_runs(id, started_at, finished_at, total_repos, ok, failed, alerts_total, schema_version)`
 - `alerts(id, repo, source, external_id, ghsa_id, cve_id, severity, cvss, summary, package,
-  ecosystem, manifest_path, scope, vulnerable_range, first_patched, state, first_seen_run,
-  last_seen_run, resolved_at)`
-- `alert_events(id, alert_id, run_id, change)` — `change ∈ {new, still_open, resolved, reopened, severity_up}`
+  ecosystem, manifest_path, scope, vulnerable_range, first_patched, secret_type, created_at,
+  state, first_seen_run, last_seen_run, resolved_at)`
+- `alert_events(id, alert_id, run_id, change, state, resolved_at)` — `change ∈ {new, still_open, resolved, reopened, severity_up}`;
+  `state` y `resolved_at` guardan la **instantánea** del ciclo de vida en el run del evento, de
+  modo que el diff de un run es **histórico** y no cambia si la alerta se reabre después.
+- Índices: `idx_alerts_repo`, `idx_alerts_state` (resolución de desaparecidas),
+  `idx_alert_events_run` y `idx_alert_events_run_change` (diff por run y cambio).
 - `UNIQUE(source, repo, external_id)` para idempotencia.
+- Limitación conocida: las alertas de repositorios que salen del inventario (nuevos forks,
+  archivados o fuera del filtro) no se resuelven, porque no se observan; permanecen abiertas.
 
 ### Control de rate limit
 Semáforo `tokio` con concurrencia configurable (def. 6) + lectura de
@@ -118,9 +124,10 @@ Mapeo de `level`: hay `critical` → `critical`; si no, hay `high` → `warning`
 El informe completo **nunca** viaja en `message`: se recorta a ≤4096 bytes **por bytes UTF-8**
 (no por chars) y se referencia la ruta del informe en disco.
 
-Modo por defecto `--valet-only-on-change`: solo notifica si `new > 0` o `resolved > 0` (evita spam
-diario). `--force` para forzar el envío. Si Valet está caído: la notificación es *best-effort*, el
-informe en disco ya está escrito y el exit code del escaneo no falla por ello.
+Modo por defecto: solo notifica si `new > 0` o `resolved > 0` (evita el spam
+diario). `--force` para forzar el envío aunque no haya novedades. Si Valet está caído: la
+notificación es *best-effort*, el informe en disco ya está escrito y el exit code del escaneo no
+falla por ello.
 
 ## 6. Fases y tareas atómicas
 
@@ -163,7 +170,7 @@ informe en disco ya está escrito y el exit code del escaneo no falla por ello.
 - **T4.3** JSON estable y versionado (`schema_version: 1`) para consumo externo.
 - **T4.4** Notificador Valet según el contrato de la sección 5. Tests de límites **exactos**
   (4096 y 8192 bytes) y de truncado con multibyte (emoji, acentos) sin partir caracteres.
-- **T4.5** `--valet-only-on-change` (def.) y `--force`.
+- **T4.5** Notificación por defecto solo-si-hay-cambios (`new > 0` o `resolved > 0`) y `--force`.
 - **T4.6** Doc de integración: crear ingest key, guardar el token (`~/.config/ghwatch/config.toml`,
   permisos 600, o keyring), y curl de verificación contra `GET /api/notifications/unread`.
 
@@ -179,7 +186,8 @@ informe en disco ya está escrito y el exit code del escaneo no falla por ello.
 ## 7. Puertas de calidad (obligatorias)
 
 1. **OpenSpec (SDD)**: crear el change `ghwatch-scanner` con `proposal.md`, deltas de spec
-   (contratos + escenarios Given/When/Then) y `tasks.md`. **STOP: no se escribe código de
+   (contratos + escenarios Given/When/Then) y `tasks.md` (histórico: el change se completó y se
+   archivó el 2026-11-04; sus specs viven en `openspec/specs/`). **STOP: no se escribe código de
    aplicación ni tests nuevos hasta que el usuario apruebe la spec.**
 2. **TDD**: rojo → verde → refactor. Los tests se escriben antes que la implementación y se
    ejecutan por CLI (`cargo test`).

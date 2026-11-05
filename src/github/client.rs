@@ -182,12 +182,18 @@ impl GithubClient {
     /// # Errores
     ///
     /// Devuelve [`GithubError::Transport`] si no se puede inicializar el
-    /// cliente HTTP subyacente.
+    /// cliente HTTP subyacente, y [`GithubError::InvalidBaseUrl`] si
+    /// `config.base_url` no es una URL absoluta válida.
     pub fn with_sleeper(
         token: Token,
         config: GithubConfig,
         sleeper: Arc<dyn Sleeper>,
     ) -> Result<Self, GithubError> {
+        if let Err(error) = reqwest::Url::parse(&config.base_url) {
+            return Err(GithubError::InvalidBaseUrl {
+                url: format!("{} ({error})", config.base_url),
+            });
+        }
         let http = reqwest::Client::builder()
             .timeout(config.timeout)
             .build()

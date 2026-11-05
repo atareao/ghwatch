@@ -9,9 +9,15 @@ on:
 permissions:
   contents: read
 
+# Nota: la validación de la especificación OpenSpec NO se ejecuta en esta CI.
+# El CLI de `openspec` es un paquete de Node y ataría la CI a npm; la validación
+# queda como receta local: `just validate` (`openspec validate --specs
+# --strict`). Tampoco se añaden dependencias frágiles: todo lo que corre aquí
+# son subcomandos de Cargo con `--locked`.
+
 jobs:
   test:
-    name: fmt · clippy · tests
+    name: fmt · clippy · tests · release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +32,12 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy sin warnings
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Tests
-        run: cargo test
+        run: cargo test --locked
+
+      # Compila el binario real con el lockfile congelado: comprueba que el
+      # artefacto de release se construye y que `Cargo.lock` está actualizado.
+      - name: Compilar binario (release)
+        run: cargo build --release --locked

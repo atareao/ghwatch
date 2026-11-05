@@ -29,6 +29,7 @@ Sin **BREAKING**: no existe una versión previa de `ghwatch`, por lo que este ch
 - `osv-enrichment`: enriquecimiento con el catálogo público OSV y priorización determinista. Nueva.
 - `reporting`: informes de consola, Markdown y JSON versionado, siempre escritos a disco. Nueva.
 - `valet-notify`: entrega del resumen a Valet por su API de ingesta, en modo best-effort. Nueva.
+- `cli`: superficie de línea de comandos (subcomandos, resolución de configuración, códigos de salida) y su contrato observable. Nueva.
 
 ### Modified Capabilities
 
@@ -36,7 +37,7 @@ Ninguna (proyecto nuevo; `openspec/specs/` está vacío).
 
 ## Impact
 
-- Módulos nuevos: `src/github/`, `src/osv/`, `src/store/`, `src/domain/`, `src/report/`, `src/notify/`.
+- Módulos nuevos: `src/github/`, `src/osv/`, `src/store/`, `src/domain/`, `src/report/`, `src/notify/`, `src/cli.rs` y `src/config.rs` (además de `src/main.rs`, que pasa de stub a entrypoint real).
 - Esquema SQLite nuevo con 4 tablas: `repos`, `scan_runs`, `alerts`, `alert_events`.
 - Dependencias externas consumidas: API de GitHub (core, 5000 req/h), OSV.dev `POST /v1/querybatch` y Valet en `127.0.0.1:3000`.
 - Efecto operativo: un systemd timer de usuario ejecuta el escaneo de forma periódica.

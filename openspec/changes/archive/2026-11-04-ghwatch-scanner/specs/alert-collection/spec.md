@@ -35,6 +35,14 @@ Un `403` (alertas deshabilitadas) o un `404` con `no analysis found` SHALL NOT a
 - **Then** el repositorio se marca con Dependabot `disabled`
 - **And** la respuesta no cuenta como fallo del escaneo
 
+#### Scenario: Secret scanning no observable
+
+- **Given** un repositorio cuya consulta de secret scanning responde `404` (público o capacidad no disponible)
+- **When** se recolectan sus alertas
+- **Then** el informe marca la fuente como no observable
+- **And** la lista de alertas queda vacía sin contar como fallo
+- **And** una alerta de secreto que dejó de observarse no se declara resuelta
+
 ### Requirement: El cliente SHALL respetar el límite de peticiones de la API
 
 El cliente SHALL leer `X-RateLimit-Remaining` y `X-RateLimit-Reset`, y SHALL pausar antes de agotar la cuota. Ante un `403` de límite secundario, SHALL reintentar respetando `Retry-After` con retroceso exponencial y SHALL acotar la concurrencia de peticiones.
@@ -72,7 +80,7 @@ La autenticación SHALL resolverse en el orden `GITHUB_TOKEN` → `gh auth token
 
 ### Requirement: La alerta normalizada SHALL tener un modelo único con independencia de su origen
 
-Toda alerta SHALL normalizarse a un modelo único con los campos `source`, `external_id`, `ghsa_id`, `cve_id`, `severity`, `cvss`, `summary`, `package`, `ecosystem`, `manifest_path`, `scope`, `vulnerable_range` y `first_patched`, donde `source` pertenece al conjunto cerrado `{dependabot, secret, code}`.
+Toda alerta SHALL normalizarse a un modelo único con los campos `source`, `external_id`, `ghsa_id`, `cve_id`, `severity`, `cvss`, `summary`, `package`, `ecosystem`, `manifest_path`, `scope`, `vulnerable_range`, `first_patched`, `secret_type` y `created_at`, donde `source` pertenece al conjunto cerrado `{dependabot, secret, code}`. `created_at` SHALL poblarse desde el instante de creación que publica GitHub para las tres fuentes, y es el dato que consume la priorización por antigüedad.
 
 #### Scenario: Alerta de Dependabot
 

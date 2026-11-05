@@ -1,0 +1,51 @@
+# ghwatch.service — unidad de **usuario** (systemd --user) que ejecuta un
+# escaneo completo de la cuenta de GitHub.
+#
+# Al ser una unidad de usuario no lleva `User=` ni `Group=`: se ejecuta con tu
+# propia identidad y con tu `HOME`. La configuración y las credenciales NO viven
+# aquí, sino en `~/.config/ghwatch/config.toml` (permisos 600); de este modo el
+# unit no contiene ningún secreto y puede versionarse sin riesgo.
+#
+# Instalación:
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/ghwatch.service systemd/ghwatch.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now ghwatch.timer
+#
+# Para que el timer corra aunque no tengas la sesión abierta:
+#
+#   loginctl enable-linger "$USER"
+#
+# Comprobación:
+#
+#   systemctl --user list-timers ghwatch.timer
+#   journalctl --user -u ghwatch
+#
+# Si el binario no está en `~/.local/bin/ghwatch`, ajusta `ExecStart` a su ruta
+# real. La instalación recomendada lo deja justo ahí:
+#
+#   cargo install --path . --locked --root "$HOME/.local"
+#
+# (sin `--root`, `cargo install` lo deja en `~/.cargo/bin/ghwatch`; en ese caso
+# ajusta `ExecStart` a `%h/.cargo/bin/ghwatch scan`).
+
+[Unit]
+Description=ghwatch: vigilancia de vulnerabilidades en los repositorios de GitHub
+Documentation=https://github.com/atareao/ghwatch
+# No hay credenciales en el unit: `scan` las resuelve del entorno o del
+# `config.toml` con permisos 600.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Ruta por convención del binario instalado. Cámbiala si lo instalaste en otro
+# sitio (`~/.cargo/bin/ghwatch`, `/usr/local/bin/ghwatch`…).
+ExecStart=%h/.local/bin/ghwatch scan
+# El escaneo escribe la base de datos en `~/.local/share/ghwatch/`; arrancar
+# desde el `HOME` evita depender de un directorio de trabajo concreto.
+WorkingDirectory=%h
+# `scan` escribe siempre el informe en disco y notifica a Valet en modo
+# *best-effort*: un Valet caído no debe reintentar la unidad, así que no se
+# configura `Restart=`.
