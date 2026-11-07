@@ -38,12 +38,21 @@
 
 ## 3. Subcomando: `--output`, `--include-empty`, `--source` y `--state`
 
-- [ ] 3.1 RED — escribir en `tests/cli.rs` (dentro de `mod cli`) los tests de `--include-empty`, `--source` y `--state` sobre una base sembrada (`Store::connect` + `persist_scan`); comando `cargo test cli`; pegar la salida en rojo.
-- [ ] 3.2 RED — escribir los tests de `--output`: el fichero contiene el listado, la salida estándar queda vacía y el código es 0; y el fallo de escritura (carpeta inexistente) devuelve 5; comando `cargo test cli`; pegar la salida en rojo.
-- [ ] 3.3 RED — escribir los tests de los valores inválidos (`--source github`, `--state volar` → error de uso, código 2) y de la ayuda de `repos` (nombra las opciones nuevas); comando `cargo test cli`; pegar la salida en rojo.
-- [ ] 3.4 GREEN — añadir `SourceFilter` y `StateFilter` (`ValueEnum`), las cuatro opciones de `ReposArgs` y la escritura del fichero en `ejecutar_repos`; confirmar con `cargo test cli`.
-- [ ] 3.5 REFACTOR — confirmar la puerta de calidad completa: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` y `cargo test` (los 314 tests previos siguen verdes).
-- [ ] 3.6 Auditoría con `@rust-reviewer` del subcomando, de los códigos de salida y de la escritura del fichero.
+- [x] 3.1 RED — escribir en `tests/cli.rs` (dentro de `mod cli`) los tests de `--include-empty`, `--source` y `--state` sobre una base sembrada (`Store::connect` + `persist_scan`); comando `cargo test cli`; pegar la salida en rojo.
+- [x] 3.2 RED — escribir los tests de `--output`: el fichero contiene el listado, la salida estándar queda vacía y el código es 0; y el fallo de escritura (carpeta inexistente) devuelve 5; comando `cargo test cli`; pegar la salida en rojo.
+- [x] 3.3 RED — escribir los tests de los valores inválidos (`--source github`, `--state volar` → error de uso, código 2) y de la ayuda de `repos` (nombra las opciones nuevas); comando `cargo test cli`; pegar la salida en rojo.
+- [x] 3.4 GREEN — añadir `SourceFilter` y `StateFilter` (`ValueEnum`), las cuatro opciones de `ReposArgs` y la escritura del fichero en `ejecutar_repos`; confirmar con `cargo test cli`.
+- [x] 3.5 REFACTOR — confirmar la puerta de calidad completa: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` y `cargo test` (los 324 tests previos siguen verdes; la suite queda en 333).
+- [x] 3.6 Auditoría con `@rust-reviewer` del subcomando, de los códigos de salida y de la escritura del fichero.
+
+### 3.7 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la sección 3 (veredicto: aprobado con reservas).
+
+- [x] 3.7.1 Hallazgo 1 — test de «base inexistente + `--output`» (no se crea el fichero). Verificación: `cargo test cli`.
+- [x] 3.7.2 Hallazgo 2 — el test de `--output` cubre los tres formatos. Verificación: `cargo test cli`.
+- [x] 3.7.3 Hallazgo 3 — el fichero reproduce los mismos bytes que la salida estándar (con test de igualdad). Verificación: `cargo test cli`.
+- [x] 3.7.4 Hallazgo 5 — la construcción de los filtros se hoista a locales. Verificación: `cargo test cli`.
 
 ## 4. Documentación
 
