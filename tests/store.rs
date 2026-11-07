@@ -13,7 +13,7 @@ mod store {
     use ghwatch::github::code_scanning::CodeScanningReport;
     use ghwatch::github::secret_scanning::SecretScanningReport;
     use ghwatch::scan::{RepoScan, ScanFailure, ScanSummary};
-    use ghwatch::store::{SCHEMA_VERSION, Store};
+    use ghwatch::store::{RepoQuery, SCHEMA_VERSION, Store};
 
     /// Instante determinista a partir de un segundo Unix.
     fn instante(segundos: i64) -> DateTime<Utc> {
@@ -111,6 +111,16 @@ mod store {
     /// Store nuevo con base de datos en memoria y migraciones aplicadas.
     async fn store() -> Store {
         Store::in_memory().await.expect("store en memoria")
+    }
+
+    /// Consulta de alertas **abiertas** (el comportamiento histórico del
+    /// subcomando `repos`) con el filtro de severidad mínima indicado.
+    fn abiertas(min_severity: Option<Severity>) -> RepoQuery {
+        RepoQuery {
+            state: Some(AlertState::Open),
+            min_severity,
+            ..RepoQuery::default()
+        }
     }
 
     /// Las migraciones crean las cuatro tablas y la clave única de idempotencia.
@@ -691,7 +701,7 @@ mod store {
             .expect("run 2");
 
         let listado = store
-            .repo_alert_counts(None)
+            .repo_alert_counts(&abiertas(None))
             .await
             .expect("recuento por repositorio");
 
@@ -826,7 +836,7 @@ mod store {
             .expect("run 2");
 
         let listado = store
-            .repo_alert_counts(None)
+            .repo_alert_counts(&abiertas(None))
             .await
             .expect("recuento por repositorio");
 
@@ -938,12 +948,15 @@ mod store {
             .expect("escaneo");
 
         // Sin filtro aparecen los tres repositorios con alertas abiertas.
-        let todos = store.repo_alert_counts(None).await.expect("sin filtro");
+        let todos = store
+            .repo_alert_counts(&abiertas(None))
+            .await
+            .expect("sin filtro");
         assert_eq!(todos.repos.len(), 3);
 
         // Con `critical`: solo el repositorio con una crítica, y **entero**.
         let criticas = store
-            .repo_alert_counts(Some(Severity::Critical))
+            .repo_alert_counts(&abiertas(Some(Severity::Critical)))
             .await
             .expect("filtro critical");
         assert_eq!(criticas.repos.len(), 1, "solo un repositorio con críticas");
@@ -973,7 +986,7 @@ mod store {
 
         // …pero sí pasa el filtro `unknown` (rank 0, que deja pasar todo).
         let desconocidas = store
-            .repo_alert_counts(Some(Severity::Unknown))
+            .repo_alert_counts(&abiertas(Some(Severity::Unknown)))
             .await
             .expect("filtro unknown");
         assert_eq!(
@@ -1000,6 +1013,13 @@ mod store {
 
         // Inserción directa: el esquema no valida `severity`, de modo que una
         // fila con un valor fuera del enum es posible y debe seguir contando.
+        // La fila de `repos` es necesaria porque la agregación parte del
+        // inventario con un `LEFT JOIN`: sin ella, la alerta no tendría
+        // repositorio del que colgar.
+        sqlx::query("INSERT INTO repos (name_with_owner) VALUES ('atareao/ajena')")
+            .execute(store.pool())
+            .await
+            .expect("repositorio del inventario");
         sqlx::query(
             "INSERT INTO alerts (repo, source, external_id, severity, state, \
              first_seen_run, last_seen_run) \
@@ -1011,7 +1031,7 @@ mod store {
         .expect("inserción directa de alertas");
 
         let listado = store
-            .repo_alert_counts(None)
+            .repo_alert_counts(&abiertas(None))
             .await
             .expect("recuento por repositorio");
 
@@ -1027,6 +1047,315 @@ mod store {
             repo.critical + repo.high + repo.medium + repo.low + repo.unknown,
             repo.alerts,
             "el desglose suma el total aunque haya una severidad ajena"
+        );
+    }
+
+    /// 1.1 — `RepoQuery.state` elige el estado de las alertas contadas:
+    /// `Some(Open)`, `Some(Resolved)` y `None` (todos).
+    #[tokio::test]
+    async fn repo_query_filtra_por_estado() {
+        let store = store().await;
+
+        // Run 1: una alerta abierta.
+        store
+            .persist_scan(
+                &resumen(
+                    vec![repo_scan(
+                        "atareao/uno",
+                        vec![alerta(AlertSource::Dependabot, "1", Some(Severity::High))],
+                    )],
+                    0,
+                ),
+                instante(1),
+                instante(2),
+            )
+            .await
+            .expect("run 1");
+
+        // Run 2: la 1 desaparece (queda resuelta) y aparece la 2 (abierta).
+        store
+            .persist_scan(
+                &resumen(
+                    vec![repo_scan(
+                        "atareao/uno",
+                        vec![alerta(AlertSource::Dependabot, "2", Some(Severity::Medium))],
+                    )],
+                    0,
+                ),
+                instante(3),
+                instante(4),
+            )
+            .await
+            .expect("run 2");
+
+        let solo_abiertas = store
+            .repo_alert_counts(&RepoQuery {
+                state: Some(AlertState::Open),
+                ..RepoQuery::default()
+            })
+            .await
+            .expect("estado open");
+        assert_eq!(solo_abiertas.repos.len(), 1);
+        assert_eq!(solo_abiertas.repos[0].alerts, 1, "solo la alerta abierta");
+        assert_eq!(
+            solo_abiertas.repos[0].medium, 1,
+            "el desglose es el de la alerta abierta"
+        );
+        assert_eq!(
+            solo_abiertas.repos[0].high, 0,
+            "la resuelta no entra en el desglose"
+        );
+
+        let resueltas = store
+            .repo_alert_counts(&RepoQuery {
+                state: Some(AlertState::Resolved),
+                ..RepoQuery::default()
+            })
+            .await
+            .expect("estado resolved");
+        assert_eq!(resueltas.repos.len(), 1);
+        assert_eq!(resueltas.repos[0].alerts, 1, "solo la alerta resuelta");
+        assert_eq!(resueltas.repos[0].high, 1);
+
+        let todas = store
+            .repo_alert_counts(&RepoQuery::default())
+            .await
+            .expect("todos los estados");
+        assert_eq!(
+            todas.repos[0].alerts, 2,
+            "sin filtro de estado cuentan abiertas y resueltas"
+        );
+    }
+
+    /// 1.1 — `RepoQuery.source` cuenta solo las alertas de esa fuente, con su
+    /// propio desglose por severidad.
+    #[tokio::test]
+    async fn repo_query_filtra_por_fuente() {
+        let store = store().await;
+        store
+            .persist_scan(
+                &resumen(
+                    vec![repo_scan(
+                        "atareao/mixto",
+                        vec![
+                            alerta(AlertSource::Dependabot, "d1", Some(Severity::High)),
+                            alerta(AlertSource::Secret, "s1", Some(Severity::Critical)),
+                        ],
+                    )],
+                    0,
+                ),
+                instante(1),
+                instante(2),
+            )
+            .await
+            .expect("escaneo");
+
+        let dependabot = store
+            .repo_alert_counts(&RepoQuery {
+                source: Some(AlertSource::Dependabot),
+                ..RepoQuery::default()
+            })
+            .await
+            .expect("fuente dependabot");
+        assert_eq!(dependabot.repos.len(), 1);
+        assert_eq!(dependabot.repos[0].alerts, 1, "solo las de Dependabot");
+        assert_eq!(dependabot.repos[0].high, 1);
+        assert_eq!(dependabot.repos[0].critical, 0);
+
+        let secret = store
+            .repo_alert_counts(&RepoQuery {
+                source: Some(AlertSource::Secret),
+                ..RepoQuery::default()
+            })
+            .await
+            .expect("fuente secret");
+        assert_eq!(secret.repos.len(), 1);
+        assert_eq!(secret.repos[0].alerts, 1, "solo las de secret scanning");
+        assert_eq!(secret.repos[0].critical, 1);
+        assert_eq!(secret.repos[0].high, 0);
+    }
+
+    /// 1.1 — `RepoQuery.include_empty` decide si aparece un repositorio del
+    /// inventario sin ninguna alerta.
+    #[tokio::test]
+    async fn repo_query_include_empty() {
+        let store = store().await;
+        store
+            .persist_scan(
+                &resumen(
+                    vec![
+                        repo_scan(
+                            "atareao/con-alertas",
+                            vec![alerta(AlertSource::Dependabot, "1", Some(Severity::High))],
+                        ),
+                        repo_scan("atareao/vacio", Vec::new()),
+                    ],
+                    0,
+                ),
+                instante(1),
+                instante(2),
+            )
+            .await
+            .expect("escaneo");
+
+        let sin_vacios = store
+            .repo_alert_counts(&RepoQuery::default())
+            .await
+            .expect("sin include_empty");
+        assert!(
+            sin_vacios.repos.iter().all(|r| r.repo != "atareao/vacio"),
+            "sin `include_empty` el repositorio vacío no aparece"
+        );
+
+        let con_vacios = store
+            .repo_alert_counts(&RepoQuery {
+                include_empty: true,
+                ..RepoQuery::default()
+            })
+            .await
+            .expect("con include_empty");
+        assert!(
+            con_vacios.repos.iter().any(|r| r.repo == "atareao/vacio"),
+            "con `include_empty` el repositorio vacío aparece"
+        );
+    }
+
+    /// 1.2 — El repositorio sin alertas aparece con los cinco cubos a cero (los
+    /// tres guardianes del `LEFT JOIN`) y el `HAVING` de severidad mínima no lo
+    /// deja pasar cuando se exige una severidad.
+    #[tokio::test]
+    async fn repo_query_repositorio_vacio_cero_y_guardianes() {
+        let store = store().await;
+        store
+            .persist_scan(
+                &resumen(
+                    vec![
+                        repo_scan(
+                            "atareao/con-alertas",
+                            vec![alerta(
+                                AlertSource::Dependabot,
+                                "1",
+                                Some(Severity::Critical),
+                            )],
+                        ),
+                        repo_scan("atareao/vacio", Vec::new()),
+                    ],
+                    0,
+                ),
+                instante(1),
+                instante(2),
+            )
+            .await
+            .expect("escaneo");
+
+        let listado = store
+            .repo_alert_counts(&RepoQuery {
+                include_empty: true,
+                ..RepoQuery::default()
+            })
+            .await
+            .expect("include_empty");
+        let vacio = listado
+            .repos
+            .iter()
+            .find(|r| r.repo == "atareao/vacio")
+            .expect("el repositorio vacío aparece");
+        assert_eq!(vacio.alerts, 0, "`COUNT(a.id)`, no `COUNT(*)`");
+        assert_eq!(
+            vacio.critical + vacio.high + vacio.medium + vacio.low + vacio.unknown,
+            0,
+            "ningún cubo cuenta la fila nula del `LEFT JOIN`"
+        );
+
+        // `min_severity = Critical` (rank 4) con `include_empty`: el repositorio
+        // vacío no pasa el `HAVING` porque `COALESCE(MAX(...), 0) = 0 < 4`.
+        let solo_criticas = store
+            .repo_alert_counts(&RepoQuery {
+                min_severity: Some(Severity::Critical),
+                include_empty: true,
+                ..RepoQuery::default()
+            })
+            .await
+            .expect("critical + include_empty");
+        assert!(
+            solo_criticas
+                .repos
+                .iter()
+                .all(|r| r.repo != "atareao/vacio"),
+            "el repositorio vacío no alcanza la severidad mínima"
+        );
+        assert!(
+            solo_criticas
+                .repos
+                .iter()
+                .any(|r| r.repo == "atareao/con-alertas"),
+            "el repositorio con una crítica sí pasa el filtro"
+        );
+    }
+
+    /// 1.3 — `repos_with_alerts` cuenta solo los repositorios con al menos una
+    /// alerta, y los repositorios vacíos se ordenan al final por nombre.
+    #[tokio::test]
+    async fn repo_query_repos_with_alerts_y_orden_con_vacios() {
+        let store = store().await;
+        store
+            .persist_scan(
+                &resumen(
+                    vec![
+                        repo_scan(
+                            "atareao/b-con-alertas",
+                            vec![
+                                alerta(AlertSource::Dependabot, "1", Some(Severity::High)),
+                                alerta(AlertSource::Dependabot, "2", Some(Severity::Low)),
+                            ],
+                        ),
+                        repo_scan(
+                            "atareao/a-con-alertas",
+                            vec![alerta(AlertSource::Dependabot, "1", Some(Severity::High))],
+                        ),
+                        repo_scan("atareao/z-vacio", Vec::new()),
+                        repo_scan("atareao/y-vacio", Vec::new()),
+                    ],
+                    0,
+                ),
+                instante(1),
+                instante(2),
+            )
+            .await
+            .expect("escaneo");
+
+        let listado = store
+            .repo_alert_counts(&RepoQuery {
+                include_empty: true,
+                ..RepoQuery::default()
+            })
+            .await
+            .expect("include_empty");
+
+        assert_eq!(
+            listado.repos.len(),
+            4,
+            "los cuatro repositorios del inventario"
+        );
+        assert_eq!(listado.repos_with_alerts, 2, "solo dos tienen alertas");
+        assert!(
+            listado.repos_with_alerts < i64::try_from(listado.repos.len()).expect("len"),
+            "hay repositorios sin alertas dentro del conjunto"
+        );
+
+        assert_eq!(
+            listado
+                .repos
+                .iter()
+                .map(|r| r.repo.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "atareao/b-con-alertas",
+                "atareao/a-con-alertas",
+                "atareao/y-vacio",
+                "atareao/z-vacio",
+            ],
+            "más alertas primero y los vacíos al final, por nombre ascendente"
         );
     }
 }

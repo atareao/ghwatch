@@ -42,7 +42,8 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 use crate::auth::{self, AuthError, Token};
 use crate::config::{self, ConfigFlags, ResolvedConfig};
-use crate::domain::alert::Severity;
+use crate::domain::alert::{AlertSource, Severity};
+use crate::domain::drift::AlertState;
 use crate::github::GithubError;
 use crate::github::client::{GithubClient, GithubConfig};
 use crate::github::repos::RepoSelection;
@@ -50,11 +51,13 @@ use crate::notify::{
     EmitOutcome, NotifyOutcome, ValetClient, ValetConfig, emit_and_notify, send_document,
 };
 use crate::osv::{OsvClient, OsvConfig};
-use crate::report::{HISTORY_EN_INFORME, ReportDocument, ReposDocument, SCHEMA_VERSION};
+use crate::report::{
+    HISTORY_EN_INFORME, RepoState, ReportDocument, ReposDocument, ReposFilters, SCHEMA_VERSION,
+};
 use crate::scan::{
     HiddenReporter, IndicatifReporter, ProgressReporter, scan, scan_with_enrichment,
 };
-use crate::store::Store;
+use crate::store::{RepoQuery, Store};
 
 /// Salida correcta.
 pub const EXIT_OK: u8 = 0;
@@ -152,7 +155,7 @@ pub enum Command {
     Diff(CommonArgs),
     /// Muestra la serie histórica almacenada.
     History(HistoryArgs),
-    /// Lista los repositorios con sus alertas abiertas.
+    /// Lista los repositorios con sus alertas.
     Repos(ReposArgs),
     /// Reenvía el último informe local a Valet.
     Notify(NotifyArgs),
@@ -249,6 +252,66 @@ impl MinSeverity {
     }
 }
 
+/// Fuente de alertas del filtro de `repos`.
+///
+/// Es un `ValueEnum` propio del CLI: `AlertSource` vive en `domain` (puro) y no
+/// debe conocer el parseo de la línea de comandos. Un valor fuera del conjunto
+/// es un error de uso (código 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SourceFilter {
+    /// Alertas de Dependabot.
+    Dependabot,
+    /// Alertas de secret scanning.
+    Secret,
+    /// Alertas de code scanning.
+    Code,
+}
+
+impl SourceFilter {
+    /// Fuente del dominio equivalente.
+    #[must_use]
+    pub fn source(self) -> AlertSource {
+        match self {
+            Self::Dependabot => AlertSource::Dependabot,
+            Self::Secret => AlertSource::Secret,
+            Self::Code => AlertSource::Code,
+        }
+    }
+}
+
+/// Estado de las alertas del filtro de `repos`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum StateFilter {
+    /// Solo alertas abiertas.
+    Open,
+    /// Solo alertas resueltas.
+    Resolved,
+    /// Abiertas y resueltas.
+    All,
+}
+
+impl StateFilter {
+    /// Estado del dominio (`None` = todos, para `RepoQuery`).
+    #[must_use]
+    pub fn alert_state(self) -> Option<AlertState> {
+        match self {
+            Self::Open => Some(AlertState::Open),
+            Self::Resolved => Some(AlertState::Resolved),
+            Self::All => None,
+        }
+    }
+
+    /// Estado de la presentación.
+    #[must_use]
+    pub fn repo_state(self) -> RepoState {
+        match self {
+            Self::Open => RepoState::Open,
+            Self::Resolved => RepoState::Resolved,
+            Self::All => RepoState::All,
+        }
+    }
+}
+
 /// Argumentos de `report`.
 #[derive(Debug, Clone, Args)]
 pub struct ReportArgs {
@@ -306,9 +369,21 @@ pub struct ReposArgs {
     /// Conserva solo los repositorios con al menos una alerta de esta severidad o superior.
     #[arg(long, value_enum)]
     pub min_severity: Option<MinSeverity>,
+    /// Incluye los repositorios sin ninguna alerta.
+    #[arg(long)]
+    pub include_empty: bool,
+    /// Cuenta solo las alertas de esta fuente.
+    #[arg(long, value_enum)]
+    pub source: Option<SourceFilter>,
+    /// Estado de las alertas contadas.
+    #[arg(long, value_enum, default_value_t = StateFilter::Open)]
+    pub state: StateFilter,
     /// Formato de la salida.
     #[arg(long, value_enum, default_value_t = OutputFormat::Console)]
     pub format: OutputFormat,
+    /// Escribe la salida en este fichero en lugar de la salida estándar.
+    #[arg(long)]
+    pub output: Option<PathBuf>,
 }
 
 /// Argumentos de `notify`.
@@ -650,8 +725,15 @@ async fn ejecutar_history(args: HistoryArgs, env: &mut Env) -> u8 {
 /// Ejecuta `repos`.
 ///
 /// Consulta la base de datos (sin abrirla si no existe, sin crearla) y compone
-/// el listado de repositorios con sus alertas abiertas en el formato pedido. Es
-/// una consulta local: no resuelve credenciales ni contacta con la red.
+/// el listado de repositorios con sus alertas —en el estado y de la fuente
+/// pedidos— en el formato elegido. Es una consulta local: no resuelve
+/// credenciales ni contacta con la red. Con `--output`, la salida formateada va
+/// al fichero indicado y no a la salida estándar; sin él, a la salida estándar.
+///
+/// Convención de bytes: el fichero reproduce **exactamente** los mismos bytes
+/// que la salida estándar, es decir, el texto formateado seguido de un `\n`
+/// (la salida estándar lo añade con `writeln!`). Así una redirección a fichero
+/// y `--output` son intercambiables.
 async fn ejecutar_repos(args: ReposArgs, env: &mut Env) -> u8 {
     let flags = ConfigFlags {
         db_path: args.db,
@@ -665,10 +747,20 @@ async fn ejecutar_repos(args: ReposArgs, env: &mut Env) -> u8 {
         Err(codigo) => return codigo,
     };
 
-    let listado = match store
-        .repo_alert_counts(args.min_severity.map(MinSeverity::severity))
-        .await
-    {
+    // Los ejes del filtro se calculan una sola vez y se reutilizan tanto en la
+    // consulta al almacén como en el documento de presentación.
+    let source = args.source.map(SourceFilter::source);
+    let min_severity = args.min_severity.map(MinSeverity::severity);
+    let include_empty = args.include_empty;
+
+    let consulta = RepoQuery {
+        state: args.state.alert_state(),
+        source,
+        min_severity,
+        include_empty,
+    };
+
+    let listado = match store.repo_alert_counts(&consulta).await {
         Ok(listado) => listado,
         Err(error) => {
             tracing::error!(error = %error, "no se pudieron contar las alertas por repositorio");
@@ -685,7 +777,13 @@ async fn ejecutar_repos(args: ReposArgs, env: &mut Env) -> u8 {
 
     // `--all` es azúcar de `--limit 0` y prevalece si se combinan.
     let limit = if args.all { None } else { Some(args.limit) };
-    let documento = ReposDocument::from_list(&listado, run_id, limit, env.now);
+    let filtros = ReposFilters {
+        state: args.state.repo_state(),
+        source,
+        min_severity,
+        include_empty,
+    };
+    let documento = ReposDocument::from_list(&listado, run_id, limit, filtros, env.now);
 
     let texto = match args.format {
         OutputFormat::Console => documento.to_console(),
@@ -699,9 +797,27 @@ async fn ejecutar_repos(args: ReposArgs, env: &mut Env) -> u8 {
         },
     };
 
-    if let Err(error) = emitir(env, &texto) {
-        tracing::error!(error = %error, "no se pudo escribir el listado de repositorios");
-        return EXIT_STORE;
+    match args.output {
+        // `--output` escribe el fichero y **no** emite por la salida estándar.
+        // Un fallo de escritura es un fallo local: no se crean directorios
+        // intermedios, así que una carpeta inexistente es un error.
+        Some(ruta) => {
+            // El fichero lleva el mismo `\n` final que `emitir` añade por stdout.
+            if let Err(error) = std::fs::write(&ruta, format!("{texto}\n")) {
+                tracing::error!(
+                    path = %ruta.display(),
+                    error = %error,
+                    "no se pudo escribir el listado en el fichero de salida"
+                );
+                return EXIT_STORE;
+            }
+        }
+        None => {
+            if let Err(error) = emitir(env, &texto) {
+                tracing::error!(error = %error, "no se pudo escribir el listado de repositorios");
+                return EXIT_STORE;
+            }
+        }
     }
     EXIT_OK
 }

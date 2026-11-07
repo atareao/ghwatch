@@ -8,8 +8,10 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
 
 - **CLI completo y operativo.** `src/main.rs` configura `tracing` (siempre a `stderr`) y
   delega en `ghwatch::cli::run`; `src/cli.rs` cablea los siete subcomandos
-  `scan|report|diff|history|repos|notify|init` (`repos` lista los repositorios con sus alertas
-  abiertas desde la base local) y `src/config.rs` resuelve la configuración con
+  `scan|report|diff|history|repos|notify|init` (`repos` lista desde la base local los
+  repositorios con sus alertas, con `--state`, `--source` y `--min-severity` como filtros,
+  `--include-empty` para los que no tienen ninguna y `--output` para volcar a fichero) y
+  `src/config.rs` resuelve la configuración con
   precedencia **flags > entorno > fichero > defecto**. Códigos de salida: `0` éxito, `2` uso,
   `3` sin credencial de GitHub, `4` fallo de la API de GitHub y `5` fallo local (base de datos,
   informe o E/S). `cargo install --path . --locked --root "$HOME/.local"` (o `just install`)
@@ -48,7 +50,7 @@ informes). Especificación viva: `openspec/`. Checkpoint arquitectónico: `PLAN.
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
-cargo test                          # 313 tests, sin red y sin token
+cargo test                          # 334 tests, sin red y sin token
 cargo test github                   # filtra por nombre (ver convención de tests)
 cargo test store                    # persistencia, histórico y agregación por repositorio
 cargo test drift                    # clasificación de deriva
@@ -117,11 +119,16 @@ cargo test auth::token_redacta
   y JSON y **después** notifica; un fallo de Valet es best-effort (no altera el exit code ni deja
   el informe a medias). `report` no hace red: la dependencia es unidireccional `notify → report`.
 - **El listado de `repos` es un orden total y su filtro no mutila el repositorio.** El orden es
-  alertas descendente y, a igualdad, nombre ascendente; `--min-severity` conserva el repositorio
-  **entero** si tiene al menos una alerta de esa severidad o superior (no recorta recuento ni
-  desglose). `repos_with_alerts`/`total_alerts` son **post-filtro** de `--min-severity` y
-  **pre-límite** de `--limit`; `known_repos` es siempre el total de la base. La agregación es una
-  consulta `GROUP BY repo` sobre `state = 'open'`, sin cambios de esquema.
+  alertas descendente y, a igualdad, nombre ascendente; los repositorios sin alertas (solo con
+  `--include-empty`) van al final. `--min-severity` conserva el repositorio **entero** si tiene al
+  menos una alerta de esa severidad o superior (no recorta recuento ni desglose); `--source` y
+  `--state` (defecto `open`) ciñen el recuento a una fuente y a un estado. `listed_repos`/
+  `repos_with_alerts`/`total_alerts` son **post-filtro** y **pre-límite** de `--limit`;
+  `known_repos` es siempre el total de la base. La agregación es una consulta `LEFT JOIN` de
+  `repos` con `alerts` (filtros de estado y fuente en el `ON`), sin cambios de esquema, y evita
+  las tres trampas del join: `COUNT(a.id)` (no `COUNT(*)`), guardián `a.id IS NOT NULL` en el
+  cubo `unknown` y `COALESCE(MAX(...), 0)` en el `HAVING`. El documento del listado es
+  `schema_version` 2.
 - **Los límites de Valet son en bytes, no en caracteres**: `message` ≤4096 B tras `trim` (recorte
   por frontera UTF-8, nunca parte un multibyte) y `metadata` ≤8192 B (reducción que jamás produce
   `400`). Un `401` aborta sin reintentar. El token de ingesta **nunca** sale por log/stdout/JSON.

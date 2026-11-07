@@ -29,7 +29,9 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 pub use persist::PersistOutcome;
-pub use query::{Diff, HistoryPoint, RepoAlertCount, RepoAlertList, StoredAlert, StoredEvent};
+pub use query::{
+    Diff, HistoryPoint, RepoAlertCount, RepoAlertList, RepoQuery, StoredAlert, StoredEvent,
+};
 
 /// Versión del esquema de datos.
 ///
