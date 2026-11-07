@@ -27,11 +27,20 @@
 
 ## 2. Presentación del listado (consola, Markdown y JSON)
 
-- [ ] 2.1 RED — escribir en `tests/report.rs` (dentro de `mod report`) los tests de los tres formatos: cabecera de totales y una línea por repositorio en consola; tabla con una columna por severidad en Markdown; documento JSON con `schema_version`, totales y lista de repositorios; comando `cargo test report`; pegar la salida en rojo.
-- [ ] 2.2 GREEN — implementar el módulo de presentación del listado bajo `src/report/`, sobre el tipo de la sección 1 y con el reloj inyectado para el instante del documento; confirmar con `cargo test report`.
-- [ ] 2.3 RED — escribir los tests de determinismo (mismo estado y mismo instante → salida idéntica) y del listado vacío (sin repositorios con alertas); comando `cargo test report`; pegar la salida en rojo.
-- [ ] 2.4 GREEN — cubrir el listado vacío y el determinismo; confirmar con `cargo test report`.
-- [ ] 2.5 Auditoría con `@rust-reviewer` del módulo de presentación y de su cobertura.
+- [x] 2.1 RED — escribir en `tests/report.rs` (dentro de `mod report`) los tests de los tres formatos: cabecera de totales y una línea por repositorio en consola; tabla con una columna por severidad en Markdown; documento JSON con `schema_version`, totales y lista de repositorios; comando `cargo test report`; pegar la salida en rojo.
+- [x] 2.2 GREEN — implementar el módulo de presentación del listado bajo `src/report/`, sobre el tipo de la sección 1 y con el reloj inyectado para el instante del documento; confirmar con `cargo test report`.
+- [x] 2.3 RED — escribir los tests de determinismo (mismo estado y mismo instante → salida idéntica) y del listado vacío (sin repositorios con alertas); comando `cargo test report`; pegar la salida en rojo.
+- [x] 2.4 GREEN — cubrir el listado vacío y el determinismo; confirmar con `cargo test report`.
+- [x] 2.5 Auditoría con `@rust-reviewer` del módulo de presentación y de su cobertura.
+
+### 2.6 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la sección 2 (veredicto: aprobado con reservas). Aplicados con TDD (rojo → verde).
+
+- [x] 2.6.1 Hallazgo 1 — test de la rama Markdown vacía (`| (ninguno) | 0 | 0 | 0 | 0 | 0 | 0 |`). Verificación: `cargo test report`.
+- [x] 2.6.2 Hallazgo 2 — el test de determinismo se renombra y documenta como guarda de pureza (el orden total de las filas se garantiza en `store::repo_alert_counts`). Verificación: `cargo test report`.
+- [x] 2.6.3 Hallazgo 3 — se fija por escrito la semántica de los totales: `repos_with_alerts` y `total_alerts` son post-filtro de `--min-severity` y pre-límite de `--limit`; `known_repos` es el total de la base de datos. Verificación: `cargo test report`.
+- [x] 2.6.4 Hallazgo 4 — imports de `store` agrupados en una sola línea. Verificación: `cargo fmt --all --check`.
 
 ## 3. Subcomando `repos`
 
