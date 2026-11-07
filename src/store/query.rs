@@ -34,6 +34,10 @@ type FilaHistorial = (i64, String, i64, i64, i64);
 /// Fila de `scan_runs`.
 type FilaRun = (i64, String, String, i64, i64, i64, i64, i64);
 
+/// Fila agregada de `alerts` por repositorio:
+/// `(repo, alerts, critical, high, medium, low, unknown)`.
+type FilaRecuentoRepo = (String, i64, i64, i64, i64, i64, i64);
+
 /// Alerta almacenada con su ciclo de vida.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredAlert {
@@ -100,6 +104,36 @@ pub struct Diff {
     pub new: Vec<StoredAlert>,
     /// Alertas que se resolvieron en esa ejecución.
     pub resolved: Vec<StoredAlert>,
+}
+
+/// Recuento de alertas abiertas de un repositorio.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoAlertCount {
+    /// Repositorio (`owner/name`).
+    pub repo: String,
+    /// Alertas abiertas del repositorio.
+    pub alerts: i64,
+    /// Alertas abiertas de severidad crítica.
+    pub critical: i64,
+    /// Alertas abiertas de severidad alta.
+    pub high: i64,
+    /// Alertas abiertas de severidad media.
+    pub medium: i64,
+    /// Alertas abiertas de severidad baja.
+    pub low: i64,
+    /// Alertas abiertas sin severidad conocida (incluye las de severidad nula).
+    pub unknown: i64,
+}
+
+/// Listado agregado de alertas abiertas por repositorio.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoAlertList {
+    /// Repositorios conocidos (filas de la tabla `repos`).
+    pub known_repos: i64,
+    /// Repositorios con al menos una alerta abierta, ya ordenados.
+    pub repos: Vec<RepoAlertCount>,
+    /// Suma de las alertas abiertas de `repos`.
+    pub total_alerts: i64,
 }
 
 impl Store {
@@ -278,6 +312,82 @@ impl Store {
         .await?;
 
         filas.into_iter().map(fila_a_alerta).collect()
+    }
+
+    /// Recuento de alertas abiertas por repositorio.
+    ///
+    /// Devuelve **todos** los repositorios con al menos una alerta abierta,
+    /// ordenados por número de alertas descendente y, a igualdad, por nombre
+    /// ascendente (el desempate es explícito en el `ORDER BY`, no se delega en
+    /// el plan de ejecución). `min_severity` conserva solo los repositorios con
+    /// al menos una alerta abierta de esa severidad o superior, sin recortar el
+    /// recuento ni el desglose que se devuelven de cada repositorio.
+    ///
+    /// La instantánea se compone de **dos lecturas** (la agregación de `alerts` y
+    /// el `COUNT(*)` de `repos`) que **no comparten transacción**: entre ambas
+    /// podría colarse una escritura. En un CLI de solo lectura local el riesgo es
+    /// despreciable y no justifica envolverlas en una transacción.
+    ///
+    /// # Errores
+    ///
+    /// Devuelve [`StoreError`] si falla la consulta.
+    pub async fn repo_alert_counts(
+        &self,
+        min_severity: Option<Severity>,
+    ) -> Result<RepoAlertList, StoreError> {
+        // Los literales de severidad de esta consulta y el mapeo 4/3/2/1/0 del
+        // `HAVING` **deben** coincidir con `Severity::as_str()` y
+        // `Severity::rank()` (src/domain/alert.rs): no los hagas divergir. El
+        // bucket `unknown` recoge cualquier valor fuera del conjunto (y `NULL`),
+        // porque `severity` es `TEXT` sin `CHECK` y podría albergar una variante
+        // ajena: así el invariante `critical+high+medium+low+unknown == alerts`
+        // se mantiene pase lo que pase.
+        let filas: Vec<FilaRecuentoRepo> = sqlx::query_as(
+            "SELECT repo, COUNT(*) AS alerts, \
+               SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END), \
+               SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END), \
+               SUM(CASE WHEN severity = 'medium' THEN 1 ELSE 0 END), \
+               SUM(CASE WHEN severity = 'low' THEN 1 ELSE 0 END), \
+               SUM(CASE WHEN severity IS NULL \
+                 OR severity NOT IN ('critical','high','medium','low') \
+                 THEN 1 ELSE 0 END) \
+             FROM alerts WHERE state = 'open' \
+             GROUP BY repo \
+             HAVING MAX(CASE severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 \
+               WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END) >= ?1 \
+             ORDER BY COUNT(*) DESC, repo ASC",
+        )
+        .bind(min_severity.map_or(0, Severity::rank))
+        .fetch_all(self.pool())
+        .await?;
+
+        let repos: Vec<RepoAlertCount> = filas.into_iter().map(fila_a_recuento).collect();
+        let total_alerts = repos.iter().map(|repo| repo.alerts).sum();
+
+        let known_repos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repos")
+            .fetch_one(self.pool())
+            .await?;
+
+        Ok(RepoAlertList {
+            known_repos,
+            repos,
+            total_alerts,
+        })
+    }
+}
+
+/// Convierte una fila agregada en el recuento de un repositorio.
+fn fila_a_recuento(fila: FilaRecuentoRepo) -> RepoAlertCount {
+    let (repo, alerts, critical, high, medium, low, unknown) = fila;
+
+    RepoAlertCount {
+        repo,
+        alerts,
+        critical,
+        high,
+        medium,
+        low,
+        unknown,
     }
 }
 

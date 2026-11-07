@@ -10,12 +10,20 @@
 
 ## 1. Agregación por repositorio en el almacén
 
-- [ ] 1.1 RED — escribir en `tests/store.rs` (dentro de `mod store`) el test de la consulta agregada sobre una base en memoria con alertas abiertas y resueltas repartidas en tres repositorios, que debe fallar porque la consulta no existe; comando `cargo test store`; pegar la salida en rojo.
-- [ ] 1.2 RED — escribir los tests del orden total (recuento descendente y, a igualdad, nombre ascendente), del desglose por severidad y de la exclusión de las alertas resueltas; comando `cargo test store`; pegar la salida en rojo.
-- [ ] 1.3 RED — escribir el test del filtro por severidad mínima (conserva el repositorio con al menos una alerta de esa severidad o superior y **no** recorta su recuento ni su desglose); comando `cargo test store`; pegar la salida en rojo.
-- [ ] 1.4 GREEN — implementar en `src/store/query.rs` la consulta agregada (`GROUP BY repo` con `state = 'open'`) y el tipo de resultado con recuento total, desglose por severidad y el número de repositorios conocidos; confirmar con `cargo test store` y `cargo check`.
-- [ ] 1.5 REFACTOR — documentar el tipo y la consulta con doc-comments y confirmar `cargo clippy --all-targets -- -D warnings` y `cargo fmt --all --check`.
-- [ ] 1.6 Auditoría con `@rust-reviewer` de la consulta agregada y de su cobertura.
+- [x] 1.1 RED — escribir en `tests/store.rs` (dentro de `mod store`) el test de la consulta agregada sobre una base en memoria con alertas abiertas y resueltas repartidas en tres repositorios, que debe fallar porque la consulta no existe; comando `cargo test store`; pegar la salida en rojo.
+- [x] 1.2 RED — escribir los tests del orden total (recuento descendente y, a igualdad, nombre ascendente), del desglose por severidad y de la exclusión de las alertas resueltas; comando `cargo test store`; pegar la salida en rojo.
+- [x] 1.3 RED — escribir el test del filtro por severidad mínima (conserva el repositorio con al menos una alerta de esa severidad o superior y **no** recorta su recuento ni su desglose); comando `cargo test store`; pegar la salida en rojo.
+- [x] 1.4 GREEN — implementar en `src/store/query.rs` la consulta agregada (`GROUP BY repo` con `state = 'open'`) y el tipo de resultado con recuento total, desglose por severidad y el número de repositorios conocidos; confirmar con `cargo test store` y `cargo check`.
+- [x] 1.5 REFACTOR — documentar el tipo y la consulta con doc-comments y confirmar `cargo clippy --all-targets -- -D warnings` y `cargo fmt --all --check`.
+- [x] 1.6 Auditoría con `@rust-reviewer` de la consulta agregada y de su cobertura.
+
+### 1.7 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la sección 1 (veredicto: aprobado con reservas). Aplicados con TDD (rojo → verde).
+
+- [x] 1.7.1 Hallazgo 1 — el test de orden inserta los repositorios empatados en orden inverso al alfabético, de modo que el desempate por nombre no puede confundirse con el orden de inserción. Verificación: `cargo test store`.
+- [x] 1.7.2 Hallazgo 2 — el bucket `unknown` pasa a `severity IS NULL OR severity NOT IN ('critical','high','medium','low')`, con un test que inserta una severidad ajena y comprueba que cuenta como desconocida y que el invariante del desglose se mantiene. Verificación: `cargo test store`.
+- [x] 1.7.3 Hallazgos 3 y 4 — comentario en el SQL que ata los literales a `Severity::as_str()`/`rank()`, y nota en el doc-comment sobre las dos lecturas no atómicas. Deuda consciente (variante nueva del enum, instantánea no atómica) documentada como follow-up en `docs/cli-repos-list.md`. Verificación: `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all --check`.
 
 ## 2. Presentación del listado (consola, Markdown y JSON)
 
