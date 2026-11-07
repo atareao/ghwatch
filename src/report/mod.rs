@@ -13,6 +13,9 @@
 //!   derivan el Markdown ([`ReportDocument::to_markdown`]) y el JSON
 //!   ([`ReportDocument::to_json`]).
 //! - [`write_reports`]: la escritura del informe en disco.
+//! - [`ReposDocument`]: el listado de repositorios con alertas abiertas, con
+//!   sus tres salidas ([`ReposDocument::to_console`],
+//!   [`ReposDocument::to_markdown`] y [`ReposDocument::to_json`]).
 //!
 //! # Independencia de la notificación
 //!
@@ -26,6 +29,7 @@ pub mod console;
 pub mod document;
 mod emit;
 mod markdown;
+pub mod repos;
 
 pub use console::{render_console, severity_color};
 pub use document::{
@@ -33,6 +37,7 @@ pub use document::{
     SCHEMA_VERSION, SeverityCounts,
 };
 pub use emit::{ReportPaths, write_reports};
+pub use repos::{REPOS_SCHEMA_VERSION, RepoEntry, RepoSeverityCounts, ReposDocument};
 
 /// Error de la generación del informe.
 ///

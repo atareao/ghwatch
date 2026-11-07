@@ -630,4 +630,403 @@ mod store {
             "el `resolved_at` de la resolución original no se altera"
         );
     }
+
+    /// 1.1 — La agregación por repositorio cuenta solo las alertas **abiertas**:
+    /// las resueltas no aparecen ni suman.
+    #[tokio::test]
+    async fn repo_alert_counts_cuenta_solo_las_alertas_abiertas() {
+        let store = store().await;
+
+        // Run 1: tres repositorios con alertas abiertas.
+        let inicial = resumen(
+            vec![
+                repo_scan(
+                    "atareao/uno",
+                    vec![
+                        alerta(AlertSource::Dependabot, "1", Some(Severity::High)),
+                        alerta(AlertSource::Dependabot, "2", Some(Severity::Medium)),
+                        alerta(AlertSource::Dependabot, "3", Some(Severity::Low)),
+                    ],
+                ),
+                repo_scan(
+                    "atareao/dos",
+                    vec![
+                        alerta(AlertSource::Dependabot, "4", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "5", Some(Severity::High)),
+                    ],
+                ),
+                repo_scan(
+                    "atareao/tres",
+                    vec![alerta(AlertSource::Dependabot, "6", Some(Severity::Medium))],
+                ),
+            ],
+            0,
+        );
+        store
+            .persist_scan(&inicial, instante(1), instante(2))
+            .await
+            .expect("run 1");
+
+        // Run 2: desaparecen las alertas 2 y 3 (uno) y la 6 (tres) → resueltas.
+        let posterior = resumen(
+            vec![
+                repo_scan(
+                    "atareao/uno",
+                    vec![alerta(AlertSource::Dependabot, "1", Some(Severity::High))],
+                ),
+                repo_scan(
+                    "atareao/dos",
+                    vec![
+                        alerta(AlertSource::Dependabot, "4", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "5", Some(Severity::High)),
+                    ],
+                ),
+                repo_scan("atareao/tres", Vec::new()),
+            ],
+            0,
+        );
+        store
+            .persist_scan(&posterior, instante(3), instante(4))
+            .await
+            .expect("run 2");
+
+        let listado = store
+            .repo_alert_counts(None)
+            .await
+            .expect("recuento por repositorio");
+
+        // Solo los repositorios con alertas abiertas; `tres` queda fuera.
+        assert_eq!(listado.repos.len(), 2, "solo dos repositorios con abiertas");
+        assert_eq!(
+            listado.known_repos, 3,
+            "los tres repositorios siguen conocidos"
+        );
+        assert_eq!(listado.total_alerts, 3, "solo cuentan las alertas abiertas");
+
+        let dos = &listado.repos[0];
+        assert_eq!(dos.repo, "atareao/dos");
+        assert_eq!(dos.alerts, 2);
+        let uno = &listado.repos[1];
+        assert_eq!(uno.repo, "atareao/uno");
+        assert_eq!(uno.alerts, 1, "las alertas resueltas no cuentan");
+        assert!(
+            listado.repos.iter().all(|repo| repo.repo != "atareao/tres"),
+            "un repositorio sin alertas abiertas no aparece"
+        );
+    }
+
+    /// 1.2 — Orden total (recuento descendente y, a igualdad, nombre
+    /// ascendente), desglose por severidad (con `NULL` contado como `unknown`)
+    /// y exclusión de las alertas resueltas.
+    ///
+    /// Los tres repositorios empatados a cinco alertas se insertan en orden
+    /// **inverso** al alfabético (`zzz`, `beta`, `alfa`), de modo que la
+    /// secuencia esperada no puede satisfacerse ni con el orden de inserción ni
+    /// con ningún orden implícito: solo con el desempate explícito `repo ASC`.
+    #[tokio::test]
+    async fn repo_alert_counts_ordena_y_desglosa_por_severidad() {
+        let store = store().await;
+
+        let escaneo = resumen(
+            vec![
+                repo_scan(
+                    "atareao/zzz",
+                    vec![
+                        alerta(AlertSource::Dependabot, "1", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "2", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "3", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "4", Some(Severity::High)),
+                        alerta(AlertSource::Dependabot, "5", Some(Severity::Low)),
+                    ],
+                ),
+                repo_scan(
+                    "atareao/beta",
+                    vec![
+                        alerta(AlertSource::Dependabot, "1", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "2", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "3", Some(Severity::High)),
+                        alerta(AlertSource::Dependabot, "4", Some(Severity::Low)),
+                        // `unknown` explícito: también cuenta como desconocida.
+                        alerta(AlertSource::Dependabot, "5", Some(Severity::Unknown)),
+                    ],
+                ),
+                repo_scan(
+                    "atareao/alfa",
+                    vec![
+                        alerta(AlertSource::Dependabot, "1", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "2", Some(Severity::High)),
+                        alerta(AlertSource::Dependabot, "3", Some(Severity::Medium)),
+                        alerta(AlertSource::Dependabot, "4", Some(Severity::Low)),
+                        // Severidad nula: debe contar como `unknown`.
+                        alerta(AlertSource::Dependabot, "5", None),
+                    ],
+                ),
+                repo_scan(
+                    "atareao/gamma",
+                    vec![
+                        alerta(AlertSource::Dependabot, "1", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "2", Some(Severity::Medium)),
+                        alerta(AlertSource::Dependabot, "3", Some(Severity::Low)),
+                    ],
+                ),
+            ],
+            0,
+        );
+        store
+            .persist_scan(&escaneo, instante(1), instante(2))
+            .await
+            .expect("run 1");
+
+        // Run 2: la crítica de gamma se resuelve (no debe contar).
+        let posterior = resumen(
+            vec![
+                repo_scan(
+                    "atareao/zzz",
+                    vec![
+                        alerta(AlertSource::Dependabot, "1", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "2", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "3", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "4", Some(Severity::High)),
+                        alerta(AlertSource::Dependabot, "5", Some(Severity::Low)),
+                    ],
+                ),
+                repo_scan(
+                    "atareao/beta",
+                    vec![
+                        alerta(AlertSource::Dependabot, "1", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "2", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "3", Some(Severity::High)),
+                        alerta(AlertSource::Dependabot, "4", Some(Severity::Low)),
+                        alerta(AlertSource::Dependabot, "5", Some(Severity::Unknown)),
+                    ],
+                ),
+                repo_scan(
+                    "atareao/alfa",
+                    vec![
+                        alerta(AlertSource::Dependabot, "1", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "2", Some(Severity::High)),
+                        alerta(AlertSource::Dependabot, "3", Some(Severity::Medium)),
+                        alerta(AlertSource::Dependabot, "4", Some(Severity::Low)),
+                        alerta(AlertSource::Dependabot, "5", None),
+                    ],
+                ),
+                repo_scan(
+                    "atareao/gamma",
+                    vec![
+                        alerta(AlertSource::Dependabot, "2", Some(Severity::Medium)),
+                        alerta(AlertSource::Dependabot, "3", Some(Severity::Low)),
+                    ],
+                ),
+            ],
+            0,
+        );
+        store
+            .persist_scan(&posterior, instante(3), instante(4))
+            .await
+            .expect("run 2");
+
+        let listado = store
+            .repo_alert_counts(None)
+            .await
+            .expect("recuento por repositorio");
+
+        assert_eq!(listado.known_repos, 4);
+        assert_eq!(listado.total_alerts, 17);
+        assert_eq!(
+            listado
+                .repos
+                .iter()
+                .map(|repo| repo.repo.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "atareao/alfa",
+                "atareao/beta",
+                "atareao/zzz",
+                "atareao/gamma"
+            ],
+            "los tres de cinco empatan por nombre ascendente (no por inserción); gamma (2) va última"
+        );
+
+        let alfa = &listado.repos[0];
+        assert_eq!(
+            (
+                alfa.alerts,
+                alfa.critical,
+                alfa.high,
+                alfa.medium,
+                alfa.low,
+                alfa.unknown
+            ),
+            (5, 1, 1, 1, 1, 1),
+            "alfa: una de cada severidad, incluida la de severidad nula"
+        );
+
+        let beta = &listado.repos[1];
+        assert_eq!(
+            (
+                beta.alerts,
+                beta.critical,
+                beta.high,
+                beta.medium,
+                beta.low,
+                beta.unknown
+            ),
+            (5, 2, 1, 0, 1, 1),
+            "beta: dos críticas y una `unknown` explícita"
+        );
+
+        let zzz = &listado.repos[2];
+        assert_eq!(
+            (
+                zzz.alerts,
+                zzz.critical,
+                zzz.high,
+                zzz.medium,
+                zzz.low,
+                zzz.unknown
+            ),
+            (5, 3, 1, 0, 1, 0),
+            "zzz: tres críticas, y sin embargo se insertó el primero"
+        );
+
+        let gamma = &listado.repos[3];
+        assert_eq!(
+            (gamma.alerts, gamma.critical, gamma.medium, gamma.low),
+            (2, 0, 1, 1),
+            "gamma: la crítica resuelta no cuenta"
+        );
+
+        for repo in &listado.repos {
+            assert_eq!(
+                repo.critical + repo.high + repo.medium + repo.low + repo.unknown,
+                repo.alerts,
+                "el desglose de {} suma su total",
+                repo.repo
+            );
+        }
+    }
+
+    /// 1.3 — `min_severity` conserva los repositorios con al menos una alerta de
+    /// esa severidad o superior, **sin** recortar el recuento ni el desglose.
+    #[tokio::test]
+    async fn repo_alert_counts_filtra_por_severidad_minima() {
+        let store = store().await;
+        let escaneo = resumen(
+            vec![
+                repo_scan(
+                    "atareao/critico",
+                    vec![
+                        alerta(AlertSource::Dependabot, "1", Some(Severity::Critical)),
+                        alerta(AlertSource::Dependabot, "2", Some(Severity::Medium)),
+                        alerta(AlertSource::Dependabot, "3", Some(Severity::Low)),
+                    ],
+                ),
+                repo_scan(
+                    "atareao/solo-medio",
+                    vec![alerta(AlertSource::Dependabot, "1", Some(Severity::Medium))],
+                ),
+                repo_scan(
+                    "atareao/solo-unknown",
+                    vec![alerta(AlertSource::Dependabot, "1", None)],
+                ),
+            ],
+            0,
+        );
+        store
+            .persist_scan(&escaneo, instante(1), instante(2))
+            .await
+            .expect("escaneo");
+
+        // Sin filtro aparecen los tres repositorios con alertas abiertas.
+        let todos = store.repo_alert_counts(None).await.expect("sin filtro");
+        assert_eq!(todos.repos.len(), 3);
+
+        // Con `critical`: solo el repositorio con una crítica, y **entero**.
+        let criticas = store
+            .repo_alert_counts(Some(Severity::Critical))
+            .await
+            .expect("filtro critical");
+        assert_eq!(criticas.repos.len(), 1, "solo un repositorio con críticas");
+        let critico = &criticas.repos[0];
+        assert_eq!(critico.repo, "atareao/critico");
+        assert_eq!(critico.alerts, 3, "el recuento no se recorta");
+        assert_eq!(
+            (
+                critico.critical,
+                critico.high,
+                critico.medium,
+                critico.low,
+                critico.unknown
+            ),
+            (1, 0, 1, 1, 0),
+            "el desglose sigue mostrando todas sus alertas abiertas"
+        );
+
+        // Un repositorio con solo una alerta sin severidad no alcanza `critical`…
+        assert!(
+            criticas
+                .repos
+                .iter()
+                .all(|repo| repo.repo != "atareao/solo-unknown"),
+            "una alerta desconocida no alcanza la severidad crítica"
+        );
+
+        // …pero sí pasa el filtro `unknown` (rank 0, que deja pasar todo).
+        let desconocidas = store
+            .repo_alert_counts(Some(Severity::Unknown))
+            .await
+            .expect("filtro unknown");
+        assert_eq!(
+            desconocidas.repos.len(),
+            3,
+            "el filtro `unknown` deja pasar todo repositorio con alguna alerta"
+        );
+        assert!(
+            desconocidas
+                .repos
+                .iter()
+                .any(|repo| repo.repo == "atareao/solo-unknown"),
+            "el repositorio con severidad nula aparece con el filtro `unknown`"
+        );
+    }
+
+    /// 1.7.2 — Una severidad **ajena** al conjunto cerrado no debe perderse: la
+    /// columna es `TEXT` sin `CHECK`, así que puede contener un valor que no es
+    /// ninguno de los cinco; esa fila debe contar como desconocida y el desglose
+    /// debe seguir sumando el total (invariante del bucket `unknown`).
+    #[tokio::test]
+    async fn repo_alert_counts_cuenta_como_desconocida_una_severidad_ajena() {
+        let store = store().await;
+
+        // Inserción directa: el esquema no valida `severity`, de modo que una
+        // fila con un valor fuera del enum es posible y debe seguir contando.
+        sqlx::query(
+            "INSERT INTO alerts (repo, source, external_id, severity, state, \
+             first_seen_run, last_seen_run) \
+             VALUES ('atareao/ajena', 'dependabot', '1', 'high', 'open', 1, 1), \
+                    ('atareao/ajena', 'dependabot', '2', 'moderate', 'open', 1, 1)",
+        )
+        .execute(store.pool())
+        .await
+        .expect("inserción directa de alertas");
+
+        let listado = store
+            .repo_alert_counts(None)
+            .await
+            .expect("recuento por repositorio");
+
+        assert_eq!(listado.repos.len(), 1);
+        let repo = &listado.repos[0];
+        assert_eq!(repo.alerts, 2);
+        assert_eq!(repo.high, 1, "la severidad conocida sigue en su bucket");
+        assert_eq!(
+            repo.unknown, 1,
+            "una severidad ajena al conjunto cuenta como desconocida"
+        );
+        assert_eq!(
+            repo.critical + repo.high + repo.medium + repo.low + repo.unknown,
+            repo.alerts,
+            "el desglose suma el total aunque haya una severidad ajena"
+        );
+    }
 }

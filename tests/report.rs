@@ -16,10 +16,11 @@ mod report {
     use ghwatch::github::code_scanning::CodeScanningReport;
     use ghwatch::github::secret_scanning::SecretScanningReport;
     use ghwatch::report::{
-        self, HISTORY_EN_INFORME, ReportDocument, SeverityCounts, render_console, severity_color,
+        self, HISTORY_EN_INFORME, REPOS_SCHEMA_VERSION, RepoEntry, RepoSeverityCounts,
+        ReportDocument, ReposDocument, SeverityCounts, render_console, severity_color,
     };
     use ghwatch::scan::{RepoScan, ScanFailure, ScanSummary};
-    use ghwatch::store::HistoryPoint;
+    use ghwatch::store::{HistoryPoint, RepoAlertCount, RepoAlertList};
 
     /// Instante determinista a partir de un segundo Unix.
     fn instante(segundos: i64) -> DateTime<Utc> {
@@ -609,5 +610,276 @@ mod report {
             severity_color(Severity::Low)
         );
         assert_eq!(severity_color(Severity::Low), Color::Green);
+    }
+
+    // --- 2.x Listado de repositorios (consola, Markdown y JSON) ---
+
+    /// Listado agregado de ejemplo: tres repositorios con alertas y 367 conocidos.
+    fn listado() -> RepoAlertList {
+        RepoAlertList {
+            known_repos: 367,
+            repos: vec![
+                RepoAlertCount {
+                    repo: "atareao/uno".to_string(),
+                    alerts: 5,
+                    critical: 1,
+                    high: 2,
+                    medium: 1,
+                    low: 1,
+                    unknown: 0,
+                },
+                RepoAlertCount {
+                    repo: "atareao/dos".to_string(),
+                    alerts: 3,
+                    critical: 0,
+                    high: 1,
+                    medium: 0,
+                    low: 0,
+                    unknown: 2,
+                },
+                RepoAlertCount {
+                    repo: "atareao/tres".to_string(),
+                    alerts: 1,
+                    critical: 1,
+                    high: 0,
+                    medium: 0,
+                    low: 0,
+                    unknown: 0,
+                },
+            ],
+            total_alerts: 9,
+        }
+    }
+
+    /// 2.1a — la consola muestra una cabecera con los totales y una línea por
+    /// repositorio con su nombre, su recuento y su desglose por severidad.
+    #[test]
+    fn la_consola_del_listado_muestra_totales_y_una_linea_por_repositorio() {
+        let documento = ReposDocument::from_list(&listado(), 7, None, instante(1_700_000_000));
+        let salida = documento.to_console();
+
+        assert!(
+            salida.contains("ejecución #7"),
+            "cabecera con la ejecución: {salida}"
+        );
+        assert!(
+            salida.contains("repositorios con alertas: 3 de 367"),
+            "totales de repositorios: {salida}"
+        );
+        assert!(
+            salida.contains("alertas abiertas: 9"),
+            "total de alertas: {salida}"
+        );
+        assert!(
+            salida.contains("atareao/uno  5  (critical=1 high=2 medium=1 low=1 unknown=0)"),
+            "línea del primer repositorio: {salida}"
+        );
+        assert!(
+            salida.contains("atareao/dos  3  (critical=0 high=1 medium=0 low=0 unknown=2)"),
+            "línea del segundo repositorio: {salida}"
+        );
+    }
+
+    /// 2.1a — con la lista vacía, la consola avisa de que no hay repositorios.
+    #[test]
+    fn la_consola_del_listado_vacio_avisa_de_que_no_hay_repositorios() {
+        let vacio = RepoAlertList {
+            known_repos: 10,
+            repos: Vec::new(),
+            total_alerts: 0,
+        };
+        let documento = ReposDocument::from_list(&vacio, 1, None, instante(1_700_000_000));
+        let salida = documento.to_console();
+
+        assert!(
+            salida.contains("sin repositorios con alertas"),
+            "aviso de lista vacía: {salida}"
+        );
+    }
+
+    /// 2.1b — el Markdown tiene el título, la cabecera de la tabla con una
+    /// columna por severidad y una fila por repositorio con su desglose.
+    #[test]
+    fn el_markdown_del_listado_tiene_una_columna_por_severidad_y_una_fila_por_repositorio() {
+        let documento = ReposDocument::from_list(&listado(), 7, None, instante(1_700_000_000));
+        let md = documento.to_markdown();
+
+        assert!(md.contains("# Repositorios con alertas"), "título: {md}");
+        assert!(
+            md.contains(
+                "| Repositorio | Alertas | Críticas | Altas | Medias | Bajas | Desconocidas |"
+            ),
+            "cabecera de la tabla: {md}"
+        );
+        assert!(
+            md.contains("| atareao/uno | 5 | 1 | 2 | 1 | 1 | 0 |"),
+            "fila del primer repositorio: {md}"
+        );
+        assert!(
+            md.contains("| atareao/dos | 3 | 0 | 1 | 0 | 0 | 2 |"),
+            "fila del segundo repositorio: {md}"
+        );
+    }
+
+    /// 2.1b — con el listado vacío, el Markdown emite una única fila
+    /// `(ninguno)` con todos los cubos a cero y ninguna fila de repositorio.
+    #[test]
+    fn el_markdown_del_listado_vacio_emite_la_fila_ninguno() {
+        let vacio = RepoAlertList {
+            known_repos: 10,
+            repos: Vec::new(),
+            total_alerts: 0,
+        };
+        let documento = ReposDocument::from_list(&vacio, 1, None, instante(1_700_000_000));
+        let md = documento.to_markdown();
+
+        assert!(
+            md.contains("| (ninguno) | 0 | 0 | 0 | 0 | 0 | 0 |"),
+            "la fila de lista vacía: {md}"
+        );
+        assert!(
+            !md.lines().any(|linea| linea.starts_with("| atareao/")),
+            "no debe haber filas de repositorio: {md}"
+        );
+    }
+
+    /// 2.1c — el JSON declara `schema_version`, los totales y la lista de
+    /// repositorios, cada uno con su desglose por severidad.
+    #[test]
+    fn el_json_del_listado_declara_schema_version_totales_y_repositorios() {
+        let documento = ReposDocument::from_list(&listado(), 7, None, instante(1_700_000_000));
+        let json = documento.to_json().expect("serializa el listado");
+        let valor: serde_json::Value = serde_json::from_str(&json).expect("JSON válido");
+
+        assert_eq!(
+            valor["schema_version"],
+            serde_json::json!(REPOS_SCHEMA_VERSION)
+        );
+        assert_eq!(valor["run_id"], serde_json::json!(7));
+        assert_eq!(valor["known_repos"], serde_json::json!(367));
+        assert_eq!(valor["repos_with_alerts"], serde_json::json!(3));
+        assert_eq!(valor["total_alerts"], serde_json::json!(9));
+
+        let primero = &valor["repos"][0];
+        assert_eq!(primero["repo"], serde_json::json!("atareao/uno"));
+        assert_eq!(primero["alerts"], serde_json::json!(5));
+        assert_eq!(primero["by_severity"]["critical"], serde_json::json!(1));
+        assert_eq!(primero["by_severity"]["high"], serde_json::json!(2));
+        assert_eq!(primero["by_severity"]["medium"], serde_json::json!(1));
+        assert_eq!(primero["by_severity"]["low"], serde_json::json!(1));
+        assert_eq!(primero["by_severity"]["unknown"], serde_json::json!(0));
+    }
+
+    /// 2.1c — el JSON de una lista vacía lleva `repos: []`.
+    #[test]
+    fn el_json_del_listado_vacio_tiene_una_lista_de_repositorios_vacia() {
+        let vacio = RepoAlertList {
+            known_repos: 10,
+            repos: Vec::new(),
+            total_alerts: 0,
+        };
+        let documento = ReposDocument::from_list(&vacio, 1, None, instante(1_700_000_000));
+        let json = documento.to_json().expect("serializa el listado");
+        let valor: serde_json::Value = serde_json::from_str(&json).expect("JSON válido");
+
+        assert_eq!(valor["repos"], serde_json::json!([]));
+        assert_eq!(valor["repos_with_alerts"], serde_json::json!(0));
+    }
+
+    /// El desglose copia los cinco cubos del recuento y su total es la suma.
+    #[test]
+    fn el_desglose_copia_los_cinco_cubos_y_suma_el_total() {
+        let recuento = RepoAlertCount {
+            repo: "atareao/uno".to_string(),
+            alerts: 6,
+            critical: 1,
+            high: 2,
+            medium: 1,
+            low: 1,
+            unknown: 1,
+        };
+        let desglose = RepoSeverityCounts::from(&recuento);
+
+        assert_eq!(
+            desglose,
+            RepoSeverityCounts {
+                critical: 1,
+                high: 2,
+                medium: 1,
+                low: 1,
+                unknown: 1,
+            }
+        );
+        assert_eq!(desglose.total(), 6);
+    }
+
+    /// 2.3a — guarda de pureza: la presentación no introduce orden no
+    /// determinista interno, de modo que el mismo listado y el mismo instante
+    /// producen salidas idénticas en los tres formatos.
+    ///
+    /// **Qué prueba:** que `ReposDocument::from_list`, `to_console`,
+    /// `to_markdown` y `to_json` son funciones puras del listado y del instante
+    /// recibidos; en particular, que la conversión fila a fila no depende de
+    /// estado oculto (iteración sobre `HashMap`, relojes, etc.).
+    ///
+    /// **Qué NO prueba:** el orden total y reproducible de las filas. Ese orden
+    /// —recuento descendente y, a igualdad, nombre ascendente— se garantiza en
+    /// `store::repo_alert_counts` (sección 1) y aquí solo se refleja; como el
+    /// listado de este test se construye a mano, una entrada ya ordenada no
+    /// podría evidenciar un reordenamiento.
+    #[test]
+    fn el_listado_no_introduce_no_determinismo_en_los_tres_formatos() {
+        let listado = listado();
+        let now = instante(1_700_000_000);
+        let uno = ReposDocument::from_list(&listado, 7, None, now);
+        let dos = ReposDocument::from_list(&listado, 7, None, now);
+
+        assert_eq!(uno.to_console(), dos.to_console(), "consola determinista");
+        assert_eq!(
+            uno.to_markdown(),
+            dos.to_markdown(),
+            "Markdown determinista"
+        );
+        assert_eq!(
+            uno.to_json().expect("json"),
+            dos.to_json().expect("json"),
+            "JSON determinista"
+        );
+    }
+
+    /// 2.3b — `limit` acota las filas pero no los totales; `None` y `Some(0)`
+    /// incluyen todas.
+    #[test]
+    fn el_limite_acota_las_filas_pero_no_los_totales() {
+        let listado = listado();
+        let now = instante(1_700_000_000);
+
+        let limitado = ReposDocument::from_list(&listado, 7, Some(2), now);
+        assert_eq!(limitado.repos.len(), 2, "solo las dos primeras filas");
+        assert_eq!(limitado.repos[0].repo, "atareao/uno");
+        assert_eq!(limitado.repos[1].repo, "atareao/dos");
+        assert_eq!(
+            limitado.repos_with_alerts, 3,
+            "los totales reflejan el conjunto completo"
+        );
+        assert_eq!(limitado.known_repos, 367);
+        assert_eq!(limitado.total_alerts, 9);
+
+        let todas = ReposDocument::from_list(&listado, 7, None, now);
+        assert_eq!(todas.repos.len(), 3, "sin límite salen todas");
+
+        let cero = ReposDocument::from_list(&listado, 7, Some(0), now);
+        assert_eq!(cero.repos.len(), 3, "el límite cero equivale a todas");
+    }
+
+    /// `RepoEntry` y el documento conservan los tipos fuertes de la API.
+    #[test]
+    fn la_entrada_del_listado_expone_los_tipos_del_documento() {
+        let documento = ReposDocument::from_list(&listado(), 7, None, instante(1_700_000_000));
+        let primera: &RepoEntry = &documento.repos[0];
+        assert_eq!(primera.repo, "atareao/uno");
+        assert_eq!(primera.alerts, 5);
+        assert_eq!(primera.by_severity.high, 2);
+        assert_eq!(documento.schema_version, REPOS_SCHEMA_VERSION);
     }
 }

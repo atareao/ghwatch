@@ -1,6 +1,6 @@
 //! Tests de integración del CLI.
 //!
-//! Cubren la superficie de `cli` y `config`: los seis subcomandos, los códigos
+//! Cubren la superficie de `cli` y `config`: los siete subcomandos, los códigos
 //! de salida, el flujo completo de `scan` (GitHub + OSV + Valet simulados con
 //! `wiremock`), la idempotencia, los subcomandos de consulta sin credenciales, la
 //! inicialización y la no filtración de tokens.
@@ -22,8 +22,13 @@ mod cli {
     use clap::error::ErrorKind;
     use ghwatch::auth::{AuthError, Token};
     use ghwatch::cli::{Cli, EXIT_AUTH, EXIT_GITHUB, EXIT_OK, EXIT_STORE, Env, run_with};
+    use ghwatch::domain::alert::{Alert, AlertSource, Severity};
+    use ghwatch::domain::repo::{DependabotState, Repo};
+    use ghwatch::github::code_scanning::CodeScanningReport;
+    use ghwatch::github::secret_scanning::SecretScanningReport;
     use ghwatch::report::ReportDocument;
-    use ghwatch::scan::ProgressReporter;
+    use ghwatch::scan::{ProgressReporter, RepoScan, ScanSummary};
+    use ghwatch::store::Store;
     use serde_json::{Value, json};
     use wiremock::matchers::{method, path, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -418,20 +423,175 @@ mod cli {
         run_with(cli_de(&args), env).await
     }
 
+    // --- 3 `repos`: siembra de una base en disco ---
+
+    /// Alerta mínima del origen y severidad indicados.
+    fn alerta(source: AlertSource, external_id: &str, severity: Option<Severity>) -> Alert {
+        Alert {
+            source,
+            external_id: external_id.to_string(),
+            ghsa_id: None,
+            cve_id: None,
+            severity,
+            cvss: None,
+            summary: Some(format!("alerta {external_id}")),
+            package: Some("paquete".to_string()),
+            ecosystem: Some("pip".to_string()),
+            manifest_path: None,
+            scope: None,
+            vulnerable_range: None,
+            first_patched: None,
+            secret_type: None,
+            created_at: None,
+        }
+    }
+
+    /// `n` alertas de Dependabot de la severidad indicada, con ids `prefijo-1..n`.
+    fn dependabot_n(prefijo: &str, n: usize, severity: Severity) -> Vec<Alert> {
+        (1..=n)
+            .map(|i| {
+                alerta(
+                    AlertSource::Dependabot,
+                    &format!("{prefijo}-{i}"),
+                    Some(severity),
+                )
+            })
+            .collect()
+    }
+
+    /// Recolección de un repositorio con Dependabot habilitado y las alertas
+    /// indicadas, repartidas por su fuente.
+    fn repo_scan(nombre: &str, alertas: Vec<Alert>) -> RepoScan {
+        let mut dependabot_alerts = Vec::new();
+        let mut secrets = Vec::new();
+        let mut code = Vec::new();
+        for alerta in alertas {
+            match alerta.source {
+                AlertSource::Dependabot => dependabot_alerts.push(alerta),
+                AlertSource::Secret => secrets.push(alerta),
+                AlertSource::Code => code.push(alerta),
+            }
+        }
+
+        RepoScan {
+            repo: Repo {
+                name_with_owner: nombre.to_string(),
+                private: false,
+                archived: false,
+                fork: false,
+                language: Some("Rust".to_string()),
+                pushed_at: Some(instante(0)),
+                dependabot: DependabotState::Enabled,
+            },
+            dependabot_alerts,
+            secrets: SecretScanningReport {
+                observable: true,
+                alerts: secrets,
+            },
+            code: CodeScanningReport {
+                configured: true,
+                alerts: code,
+            },
+        }
+    }
+
+    /// Siembra una base de datos en disco con los repositorios indicados
+    /// (`(nombre, alertas)`) y su instantánea de escaneo.
+    async fn sembrar_db(ruta: &Path, repos: Vec<(&str, Vec<Alert>)>) {
+        let store = Store::connect(&format!("sqlite://{}", ruta.display()))
+            .await
+            .expect("abrir store en disco");
+        let scanned = repos
+            .into_iter()
+            .map(|(nombre, alertas)| repo_scan(nombre, alertas))
+            .collect();
+        let resumen = ScanSummary {
+            scanned,
+            failed: Vec::new(),
+        };
+        store
+            .persist_scan(&resumen, instante(AHORA), instante(AHORA))
+            .await
+            .expect("persistir el escaneo sembrado");
+    }
+
+    /// Nombres de repositorio en el orden en que aparecen en la salida de consola.
+    fn repos_en_orden(texto: &str) -> Vec<String> {
+        texto
+            .lines()
+            .filter(|linea| linea.contains("(critical="))
+            .map(|linea| {
+                linea
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// Nombres `atareao/r00..r{n-1}` para los tests de límite.
+    fn nombres_repos(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("atareao/r{i:02}")).collect()
+    }
+
+    /// Repositorios sembrados con una única alerta alta cada uno.
+    fn repos_con_una_alerta(nombres: &[String]) -> Vec<(&str, Vec<Alert>)> {
+        nombres
+            .iter()
+            .enumerate()
+            .map(|(i, nombre)| {
+                (
+                    nombre.as_str(),
+                    dependabot_n(&format!("r{i:02}"), 1, Severity::High),
+                )
+            })
+            .collect()
+    }
+
     // --- 7.1 Superficie del CLI ---
 
-    /// La ayuda nombra los seis subcomandos y termina con éxito.
+    /// La ayuda nombra los siete subcomandos y termina con éxito.
     #[test]
-    fn la_ayuda_nombra_los_seis_subcomandos() {
+    fn la_ayuda_nombra_los_siete_subcomandos() {
         let error = Cli::try_parse_from(["ghwatch", "--help"]).expect_err("--help no es válido");
         assert_eq!(error.kind(), ErrorKind::DisplayHelp);
         assert_eq!(error.exit_code(), 0);
 
         let texto = error.to_string();
-        for subcomando in ["scan", "report", "diff", "history", "notify", "init"] {
+        for subcomando in [
+            "scan", "report", "diff", "history", "repos", "notify", "init",
+        ] {
+            let aparece = texto
+                .lines()
+                .any(|linea| linea.trim_start().starts_with(&format!("{subcomando} ")));
             assert!(
-                texto.contains(subcomando),
-                "la ayuda debe nombrar `{subcomando}`:\n{texto}"
+                aparece,
+                "la ayuda debe nombrar `{subcomando}` como subcomando:\n{texto}"
+            );
+        }
+    }
+
+    /// La ayuda de `repos` documenta todas sus opciones y termina con éxito.
+    #[test]
+    fn la_ayuda_de_repos_documenta_sus_opciones() {
+        let error =
+            Cli::try_parse_from(["ghwatch", "repos", "--help"]).expect_err("--help no es válido");
+        assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+        assert_eq!(error.exit_code(), 0);
+
+        let texto = error.to_string();
+        for opcion in [
+            "--limit",
+            "--all",
+            "--min-severity",
+            "--format",
+            "--db",
+            "--config",
+        ] {
+            assert!(
+                texto.contains(opcion),
+                "la ayuda de `repos` debe documentar `{opcion}`:\n{texto}"
             );
         }
     }
@@ -726,6 +886,7 @@ mod cli {
             vec!["report", "--report-dir", reports],
             vec!["diff", "--db", db],
             vec!["history", "--db", db],
+            vec!["repos", "--db", db],
         ] {
             let env = EnvPrueba::nuevo().auth_falla().construir();
             let codigo = run_with(cli_de(&args), env).await;
@@ -1464,6 +1625,7 @@ mod cli {
         for args in [
             vec!["diff", "--db", db.to_str().expect("ruta")],
             vec!["history", "--db", db.to_str().expect("ruta")],
+            vec!["repos", "--db", db.to_str().expect("ruta")],
         ] {
             let env = EnvPrueba::nuevo().auth_falla().construir();
             let codigo = run_with(cli_de(&args), env).await;
@@ -1494,5 +1656,305 @@ mod cli {
         )
         .await;
         assert_eq!(codigo, EXIT_STORE);
+    }
+
+    // --- 3 Subcomando `repos` ---
+
+    /// `repos` lista los repositorios ordenados por recuento descendente y, a
+    /// igualdad, por nombre ascendente, con los totales en la cabecera.
+    #[tokio::test]
+    async fn repos_lista_los_repositorios_ordenados() {
+        let dir = tempfile::tempdir().expect("directorio temporal");
+        let db = dir.path().join("ghwatch.db");
+
+        // Se insertan en orden inverso al alfabético para que el desempate por
+        // nombre no pueda confundirse con el orden de inserción.
+        sembrar_db(
+            &db,
+            vec![
+                ("atareao/zeta", dependabot_n("z", 5, Severity::High)),
+                ("atareao/alfa", dependabot_n("a", 5, Severity::High)),
+                ("atareao/beta", dependabot_n("b", 2, Severity::Low)),
+            ],
+        )
+        .await;
+
+        let builder = EnvPrueba::nuevo().auth_falla();
+        let salida = builder.salida();
+        let env = builder.construir();
+        let codigo = run_with(cli_de(&["repos", "--db", db.to_str().expect("ruta")]), env).await;
+
+        assert_eq!(codigo, EXIT_OK);
+        let texto = salida.texto();
+        assert!(
+            texto.contains("repositorios con alertas: 3 de 3"),
+            "la cabecera cuenta los repositorios: {texto}"
+        );
+        assert!(
+            texto.contains("alertas abiertas: 12"),
+            "la cabecera cuenta las alertas: {texto}"
+        );
+        assert_eq!(
+            repos_en_orden(&texto),
+            vec!["atareao/alfa", "atareao/zeta", "atareao/beta"],
+            "orden por recuento desc y nombre asc: {texto}"
+        );
+        assert!(
+            texto.contains("(critical="),
+            "cada fila muestra su desglose: {texto}"
+        );
+    }
+
+    /// Por defecto `--limit` muestra 20 repositorios; la cabecera cuenta todos.
+    #[tokio::test]
+    async fn repos_limite_por_defecto_muestra_veinte() {
+        let dir = tempfile::tempdir().expect("directorio temporal");
+        let db = dir.path().join("ghwatch.db");
+        let nombres = nombres_repos(25);
+        sembrar_db(&db, repos_con_una_alerta(&nombres)).await;
+
+        let builder = EnvPrueba::nuevo().auth_falla();
+        let salida = builder.salida();
+        let env = builder.construir();
+        let codigo = run_with(cli_de(&["repos", "--db", db.to_str().expect("ruta")]), env).await;
+
+        assert_eq!(codigo, EXIT_OK);
+        let texto = salida.texto();
+        assert!(
+            texto.contains("repositorios con alertas: 25 de 25"),
+            "la cabecera cuenta los 25: {texto}"
+        );
+        assert_eq!(
+            repos_en_orden(&texto).len(),
+            20,
+            "solo 20 filas de repositorio: {texto}"
+        );
+    }
+
+    /// `--limit 0` y `--all` muestran todos los repositorios.
+    #[tokio::test]
+    async fn repos_limit_cero_y_all_muestran_todos() {
+        let dir = tempfile::tempdir().expect("directorio temporal");
+        let db = dir.path().join("ghwatch.db");
+        let nombres = nombres_repos(25);
+        sembrar_db(&db, repos_con_una_alerta(&nombres)).await;
+
+        for extra in [vec!["--limit", "0"], vec!["--all"]] {
+            let mut args = vec!["repos", "--db", db.to_str().expect("ruta")];
+            args.extend_from_slice(&extra);
+
+            let builder = EnvPrueba::nuevo().auth_falla();
+            let salida = builder.salida();
+            let env = builder.construir();
+            let codigo = run_with(cli_de(&args), env).await;
+
+            assert_eq!(codigo, EXIT_OK, "{args:?}");
+            assert_eq!(
+                repos_en_orden(&salida.texto()).len(),
+                25,
+                "muestra los 25 con {args:?}"
+            );
+        }
+    }
+
+    /// `--min-severity critical` conserva los repositorios con alguna crítica,
+    /// sin recortar su recuento ni su desglose.
+    #[tokio::test]
+    async fn repos_min_severity_critical_filtra_sin_recortar() {
+        let dir = tempfile::tempdir().expect("directorio temporal");
+        let db = dir.path().join("ghwatch.db");
+
+        let mut con_critica = dependabot_n("cc-crit", 1, Severity::Critical);
+        con_critica.extend(dependabot_n("cc-high", 3, Severity::High));
+        con_critica.extend(dependabot_n("cc-low", 1, Severity::Low));
+
+        sembrar_db(
+            &db,
+            vec![
+                ("atareao/con-critica", con_critica),
+                (
+                    "atareao/solo-critica",
+                    dependabot_n("sc", 2, Severity::Critical),
+                ),
+                ("atareao/sin-critica", dependabot_n("sn", 4, Severity::High)),
+            ],
+        )
+        .await;
+
+        let builder = EnvPrueba::nuevo().auth_falla();
+        let salida = builder.salida();
+        let env = builder.construir();
+        let codigo = run_with(
+            cli_de(&[
+                "repos",
+                "--db",
+                db.to_str().expect("ruta"),
+                "--min-severity",
+                "critical",
+            ]),
+            env,
+        )
+        .await;
+
+        assert_eq!(codigo, EXIT_OK);
+        let texto = salida.texto();
+        assert!(texto.contains("atareao/con-critica"), "{texto}");
+        assert!(texto.contains("atareao/solo-critica"), "{texto}");
+        assert!(
+            !texto.contains("atareao/sin-critica"),
+            "un repositorio sin críticas no aparece: {texto}"
+        );
+        assert!(
+            texto.contains("atareao/con-critica  5  (critical=1 high=3 medium=0 low=1 unknown=0)"),
+            "el recuento y el desglose no se recortan: {texto}"
+        );
+        assert!(
+            texto.contains("repositorios con alertas: 2 de 3"),
+            "la cabecera refleja el filtro y los repos conocidos: {texto}"
+        );
+    }
+
+    /// Un `--min-severity` fuera del conjunto es un error de uso (código 2).
+    #[test]
+    fn repos_min_severity_invalida_es_error_de_uso() {
+        let error = Cli::try_parse_from(["ghwatch", "repos", "--min-severity", "catastrofica"])
+            .expect_err("`catastrofica` no es una severidad");
+        assert_eq!(error.kind(), ErrorKind::InvalidValue);
+        assert_eq!(error.exit_code(), 2);
+    }
+
+    /// Sin base de datos, `repos` informa y termina con éxito sin crearla.
+    #[tokio::test]
+    async fn repos_sin_base_no_crea_y_avisa() {
+        let dir = tempfile::tempdir().expect("directorio temporal");
+        let db = dir.path().join("no-existe.db");
+
+        let builder = EnvPrueba::nuevo().auth_falla();
+        let salida = builder.salida();
+        let env = builder.construir();
+        let codigo = run_with(cli_de(&["repos", "--db", db.to_str().expect("ruta")]), env).await;
+
+        assert_eq!(codigo, EXIT_OK);
+        assert!(!db.exists(), "la consulta no debe crear la base de datos");
+        let texto = salida.texto();
+        assert!(
+            texto.contains("sin datos locales"),
+            "informa de que no hay datos: {texto}"
+        );
+        assert!(
+            texto.contains("ghwatch scan"),
+            "sugiere cómo generar los datos: {texto}"
+        );
+    }
+
+    /// `--format json` emite un documento JSON válido y versionado.
+    #[tokio::test]
+    async fn repos_format_json_es_valido() {
+        let dir = tempfile::tempdir().expect("directorio temporal");
+        let db = dir.path().join("ghwatch.db");
+        sembrar_db(
+            &db,
+            vec![("atareao/uno", dependabot_n("u", 1, Severity::High))],
+        )
+        .await;
+
+        let builder = EnvPrueba::nuevo().auth_falla();
+        let salida = builder.salida();
+        let env = builder.construir();
+        let codigo = run_with(
+            cli_de(&[
+                "repos",
+                "--db",
+                db.to_str().expect("ruta"),
+                "--format",
+                "json",
+            ]),
+            env,
+        )
+        .await;
+
+        assert_eq!(codigo, EXIT_OK);
+        let valor: Value = serde_json::from_str(salida.texto().trim()).expect("JSON válido");
+        assert_eq!(valor["schema_version"], 1);
+        assert_eq!(valor["repos"][0]["repo"], "atareao/uno");
+    }
+
+    /// `--format markdown` emite la cabecera y una fila por repositorio.
+    #[tokio::test]
+    async fn repos_format_markdown_es_tabla() {
+        let dir = tempfile::tempdir().expect("directorio temporal");
+        let db = dir.path().join("ghwatch.db");
+        sembrar_db(
+            &db,
+            vec![("atareao/uno", dependabot_n("u", 1, Severity::High))],
+        )
+        .await;
+
+        let builder = EnvPrueba::nuevo().auth_falla();
+        let salida = builder.salida();
+        let env = builder.construir();
+        let codigo = run_with(
+            cli_de(&[
+                "repos",
+                "--db",
+                db.to_str().expect("ruta"),
+                "--format",
+                "markdown",
+            ]),
+            env,
+        )
+        .await;
+
+        assert_eq!(codigo, EXIT_OK);
+        let texto = salida.texto();
+        assert!(
+            texto.contains("# Repositorios con alertas"),
+            "falta la cabecera Markdown: {texto}"
+        );
+        assert!(
+            texto.contains("| atareao/uno "),
+            "falta la fila del repositorio sembrado: {texto}"
+        );
+    }
+
+    /// Una base sin alertas abiertas informa y termina con éxito.
+    #[tokio::test]
+    async fn repos_base_vacia_informa_sin_alertas() {
+        let dir = tempfile::tempdir().expect("directorio temporal");
+        let db = dir.path().join("ghwatch.db");
+        sembrar_db(&db, vec![("atareao/sin-alertas", Vec::new())]).await;
+
+        let builder = EnvPrueba::nuevo().auth_falla();
+        let salida = builder.salida();
+        let env = builder.construir();
+        let codigo = run_with(cli_de(&["repos", "--db", db.to_str().expect("ruta")]), env).await;
+
+        assert_eq!(codigo, EXIT_OK);
+        assert!(
+            salida.texto().contains("sin repositorios con alertas"),
+            "informa de que no hay repositorios con alertas: {}",
+            salida.texto()
+        );
+    }
+
+    /// `repos` con una base de datos ilegible termina con código 5 y sin datos.
+    #[tokio::test]
+    async fn repos_con_base_ilegible_devuelve_cinco() {
+        let dir = tempfile::tempdir().expect("directorio temporal");
+
+        // La ruta de la base de datos es un directorio: sqlite no puede abrirla.
+        let db = dir.path().to_path_buf();
+
+        let builder = EnvPrueba::nuevo().auth_falla();
+        let salida = builder.salida();
+        let env = builder.construir();
+        let codigo = run_with(cli_de(&["repos", "--db", db.to_str().expect("ruta")]), env).await;
+
+        assert_eq!(codigo, EXIT_STORE);
+        assert!(
+            salida.texto().trim().is_empty(),
+            "no se emiten datos cuando la base es ilegible: {}",
+            salida.texto()
+        );
     }
 }

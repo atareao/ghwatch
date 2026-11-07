@@ -59,6 +59,7 @@ línea; usa `--quiet` para silenciar la barra de progreso y el resumen final.
 | `ghwatch report` | Reemite el último informe local. **Sin red.** |
 | `ghwatch diff` | Muestra las alertas nuevas y resueltas de la última ejecución. **Sin red.** |
 | `ghwatch history` | Muestra la serie de ejecuciones almacenada (fecha, total, nuevas, resueltas). **Sin red.** |
+| `ghwatch repos` | Lista cada repositorio con alertas abiertas, su número de alertas y su desglose por severidad. **Sin red.** |
 | `ghwatch notify` | Reenvía a Valet el último informe local sin reescribirlo. |
 | `ghwatch init` | Crea la base de datos y la plantilla de configuración, sin sobrescribir las existentes. |
 
@@ -76,18 +77,45 @@ ghwatch report --format json > informe.json
 ghwatch diff
 ghwatch history --limit 10
 
+# Repositorios con alertas abiertas, de mayor a menor
+ghwatch repos --limit 5
+
 # Reenviar el último informe aunque no haya novedades
 ghwatch notify --force
 ```
 
-`report`, `diff` y `history` **no tocan GitHub ni Valet**: leen solo la base de
-datos local y los ficheros de informe, así que puedes repetirlos sin conexión.
-Solo `scan` escanea, y solo `scan`/`notify` pueden contactar con Valet.
+`report`, `diff`, `history` y `repos` **no tocan GitHub ni Valet**: leen solo la
+base de datos local y los ficheros de informe, así que puedes repetirlos sin
+conexión. Solo `scan` escanea, y solo `scan`/`notify` pueden contactar con Valet.
 
 Flags de `scan`: `--include-forks`, `--include-archived`, `--no-enrich`,
 `--force`, `--quiet`, `-v/--verbose` (repetible), `--db`, `--report-dir`,
 `--config`, `--concurrency`, `--github-base-url`, `--osv-base-url`,
 `--valet-base-url`. Ejecuta `ghwatch <subcomando> --help` para la lista completa.
+
+`repos` lee solo la base de datos local (ni la crea ni toca la red) e imprime en
+**stdout**:
+
+- `--limit <N>`: acota cuántos repositorios se muestran; por defecto `20`, y `0`
+  los muestra todos.
+- `--all`: los muestra todos (equivale a `--limit 0`); si se combinan, `--all`
+  prevalece.
+- `--min-severity <critical|high|medium|low|unknown>`: conserva solo los
+  repositorios con al menos una alerta de esa severidad **o superior**, sin
+  recortar el recuento ni el desglose mostrados (el repositorio aparece entero);
+  `unknown` deja pasar todos los repositorios con alertas.
+- `--format <console|json|markdown>`: formato de salida, `console` por defecto,
+  siempre por stdout (no escribe ningún fichero).
+
+```
+$ ghwatch repos --limit 5
+ejecución #3 · generado 2026-11-07T08:25:50.008680277+00:00 · repositorios con alertas: 88 de 363 · alertas abiertas: 1330
+atareao/reto-python  112  (critical=8 high=63 medium=41 low=0 unknown=0)
+atareao/bloc  84  (critical=0 high=46 medium=29 low=9 unknown=0)
+atareao/presu  79  (critical=1 high=45 medium=29 low=4 unknown=0)
+atareao/tareas  59  (critical=0 high=32 medium=22 low=5 unknown=0)
+atareao/asistentes  55  (critical=3 high=19 medium=30 low=3 unknown=0)
+```
 
 ## Configuración
 
@@ -302,7 +330,7 @@ El proyecto se construye con dos puertas de calidad y una disciplina de auditor�
 ```
 src/
   main.rs   # entrypoint: configura tracing (stderr) y delega en cli::run
-  cli.rs    # clap: scan | report | diff | history | notify | init
+  cli.rs    # clap: scan | report | diff | history | repos | notify | init
   config.rs # config.toml + entorno + precedencia y comprobación de permisos
   auth.rs   # GITHUB_TOKEN -> `gh auth token` -> error tipado
   github/   # cliente HTTP, paginación por Link, cuota y las tres fuentes de alertas
@@ -310,7 +338,7 @@ src/
   scan.rs   # orquestación con concurrencia acotada y progreso
   osv/      # cliente OSV.dev querybatch, mapeo de ecosistemas y fusión
   store/    # migraciones sqlx, upsert idempotente, ciclo de vida y deriva
-  report/   # consola, Markdown y JSON versionado (sin red)
+  report/   # consola, Markdown y JSON versionado, más el listado de repositorios
   notify/   # cliente de ingesta de Valet y coordinación informe/notificación
 ```
 
