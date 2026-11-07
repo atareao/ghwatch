@@ -63,6 +63,6 @@
 
 ## 5. Verificación final
 
-- [ ] 5.1 Ejecutar `ghwatch repos --all` y `ghwatch repos --include-empty --all` contra la base de datos real y comprobar que los totales coinciden con `ghwatch report`; pegar la salida.
-- [ ] 5.2 Ejecutar la puerta de calidad completa (`cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`) y pegar el resumen.
-- [ ] 5.3 Verificar requirement por requirement del change contra la implementación y marcar las casillas de las secciones 1 a 4.
+- [x] 5.1 Ejecutar `ghwatch repos --all` y `ghwatch repos --include-empty --all` contra la base de datos real y comprobar que los totales coinciden con `ghwatch report`; pegar la salida.
+- [x] 5.2 Ejecutar la puerta de calidad completa (`cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`) y pegar el resumen.
+- [x] 5.3 Verificar requirement por requirement del change contra la implementación y marcar las casillas de las secciones 1 a 4.
