@@ -16,8 +16,9 @@ mod report {
     use ghwatch::github::code_scanning::CodeScanningReport;
     use ghwatch::github::secret_scanning::SecretScanningReport;
     use ghwatch::report::{
-        self, HISTORY_EN_INFORME, REPOS_SCHEMA_VERSION, RepoEntry, RepoSeverityCounts,
-        ReportDocument, ReposDocument, SeverityCounts, render_console, severity_color,
+        self, HISTORY_EN_INFORME, REPOS_SCHEMA_VERSION, RepoEntry, RepoSeverityCounts, RepoState,
+        ReportDocument, ReposDocument, ReposFilters, SeverityCounts, render_console,
+        severity_color,
     };
     use ghwatch::scan::{RepoScan, ScanFailure, ScanSummary};
     use ghwatch::store::{HistoryPoint, RepoAlertCount, RepoAlertList};
@@ -652,11 +653,28 @@ mod report {
         }
     }
 
+    /// Filtros mínimos para el estado dado, sin fuente, severidad mínima ni
+    /// repositorios sin alertas.
+    fn filtros(state: RepoState) -> ReposFilters {
+        ReposFilters {
+            state,
+            source: None,
+            min_severity: None,
+            include_empty: false,
+        }
+    }
+
     /// 2.1a — la consola muestra una cabecera con los totales y una línea por
     /// repositorio con su nombre, su recuento y su desglose por severidad.
     #[test]
     fn la_consola_del_listado_muestra_totales_y_una_linea_por_repositorio() {
-        let documento = ReposDocument::from_list(&listado(), 7, None, instante(1_700_000_000));
+        let documento = ReposDocument::from_list(
+            &listado(),
+            7,
+            None,
+            filtros(RepoState::Open),
+            instante(1_700_000_000),
+        );
         let salida = documento.to_console();
 
         assert!(
@@ -664,8 +682,12 @@ mod report {
             "cabecera con la ejecución: {salida}"
         );
         assert!(
-            salida.contains("repositorios con alertas: 3 de 367"),
+            salida.contains("repositorios: 3 de 367"),
             "totales de repositorios: {salida}"
+        );
+        assert!(
+            salida.contains("con alertas: 3"),
+            "repositorios con alertas: {salida}"
         );
         assert!(
             salida.contains("alertas abiertas: 9"),
@@ -690,11 +712,17 @@ mod report {
             repos: Vec::new(),
             total_alerts: 0,
         };
-        let documento = ReposDocument::from_list(&vacio, 1, None, instante(1_700_000_000));
+        let documento = ReposDocument::from_list(
+            &vacio,
+            1,
+            None,
+            filtros(RepoState::Open),
+            instante(1_700_000_000),
+        );
         let salida = documento.to_console();
 
         assert!(
-            salida.contains("sin repositorios con alertas"),
+            salida.contains("sin repositorios que mostrar"),
             "aviso de lista vacía: {salida}"
         );
     }
@@ -703,10 +731,19 @@ mod report {
     /// columna por severidad y una fila por repositorio con su desglose.
     #[test]
     fn el_markdown_del_listado_tiene_una_columna_por_severidad_y_una_fila_por_repositorio() {
-        let documento = ReposDocument::from_list(&listado(), 7, None, instante(1_700_000_000));
+        let documento = ReposDocument::from_list(
+            &listado(),
+            7,
+            None,
+            filtros(RepoState::Open),
+            instante(1_700_000_000),
+        );
         let md = documento.to_markdown();
 
-        assert!(md.contains("# Repositorios con alertas"), "título: {md}");
+        assert!(
+            md.contains("# Repositorios con alertas abiertas"),
+            "título: {md}"
+        );
         assert!(
             md.contains(
                 "| Repositorio | Alertas | Críticas | Altas | Medias | Bajas | Desconocidas |"
@@ -733,7 +770,13 @@ mod report {
             repos: Vec::new(),
             total_alerts: 0,
         };
-        let documento = ReposDocument::from_list(&vacio, 1, None, instante(1_700_000_000));
+        let documento = ReposDocument::from_list(
+            &vacio,
+            1,
+            None,
+            filtros(RepoState::Open),
+            instante(1_700_000_000),
+        );
         let md = documento.to_markdown();
 
         assert!(
@@ -750,7 +793,13 @@ mod report {
     /// repositorios, cada uno con su desglose por severidad.
     #[test]
     fn el_json_del_listado_declara_schema_version_totales_y_repositorios() {
-        let documento = ReposDocument::from_list(&listado(), 7, None, instante(1_700_000_000));
+        let documento = ReposDocument::from_list(
+            &listado(),
+            7,
+            None,
+            filtros(RepoState::Open),
+            instante(1_700_000_000),
+        );
         let json = documento.to_json().expect("serializa el listado");
         let valor: serde_json::Value = serde_json::from_str(&json).expect("JSON válido");
 
@@ -782,12 +831,70 @@ mod report {
             repos: Vec::new(),
             total_alerts: 0,
         };
-        let documento = ReposDocument::from_list(&vacio, 1, None, instante(1_700_000_000));
+        let documento = ReposDocument::from_list(
+            &vacio,
+            1,
+            None,
+            filtros(RepoState::Open),
+            instante(1_700_000_000),
+        );
         let json = documento.to_json().expect("serializa el listado");
         let valor: serde_json::Value = serde_json::from_str(&json).expect("JSON válido");
 
         assert_eq!(valor["repos"], serde_json::json!([]));
         assert_eq!(valor["repos_with_alerts"], serde_json::json!(0));
+    }
+
+    /// 2.6.2 — el JSON fija el orden de las claves del contrato.
+    ///
+    /// **Qué prueba:** que `ReposDocument::to_json` emite las claves del
+    /// contrato en el orden declarado —`schema_version`, `generated_at`,
+    /// `run_id`, `state`, `source`, `min_severity`, `include_empty`,
+    /// `known_repos`, `listed_repos`, `repos_with_alerts`, `total_alerts` y
+    /// `repos`—, de modo que el contrato no dependa en exclusiva del orden de
+    /// declaración de serde y un reordenamiento accidental lo rompa.
+    ///
+    /// **Qué NO prueba:** el formato de los valores de cada clave.
+    #[test]
+    fn el_json_del_listado_fija_el_orden_de_las_claves_del_contrato() {
+        let documento = ReposDocument::from_list(
+            &listado(),
+            7,
+            None,
+            filtros(RepoState::Open),
+            instante(1_700_000_000),
+        );
+        let json = documento.to_json().expect("serializa el listado");
+
+        let claves = [
+            "schema_version",
+            "generated_at",
+            "run_id",
+            "state",
+            "source",
+            "min_severity",
+            "include_empty",
+            "known_repos",
+            "listed_repos",
+            "repos_with_alerts",
+            "total_alerts",
+            "repos",
+        ];
+
+        let mut anterior = 0_usize;
+        for (indice, clave) in claves.iter().enumerate() {
+            let patron = format!("\"{clave}\"");
+            let posicion = json
+                .find(&patron)
+                .unwrap_or_else(|| panic!("falta la clave {clave} en el JSON: {json}"));
+            if indice > 0 {
+                assert!(
+                    posicion > anterior,
+                    "la clave {clave} debe ir después de la anterior: {json}"
+                );
+            }
+            anterior = posicion;
+        }
     }
 
     /// El desglose copia los cinco cubos del recuento y su total es la suma.
@@ -835,8 +942,8 @@ mod report {
     fn el_listado_no_introduce_no_determinismo_en_los_tres_formatos() {
         let listado = listado();
         let now = instante(1_700_000_000);
-        let uno = ReposDocument::from_list(&listado, 7, None, now);
-        let dos = ReposDocument::from_list(&listado, 7, None, now);
+        let uno = ReposDocument::from_list(&listado, 7, None, filtros(RepoState::Open), now);
+        let dos = ReposDocument::from_list(&listado, 7, None, filtros(RepoState::Open), now);
 
         assert_eq!(uno.to_console(), dos.to_console(), "consola determinista");
         assert_eq!(
@@ -858,7 +965,8 @@ mod report {
         let listado = listado();
         let now = instante(1_700_000_000);
 
-        let limitado = ReposDocument::from_list(&listado, 7, Some(2), now);
+        let limitado =
+            ReposDocument::from_list(&listado, 7, Some(2), filtros(RepoState::Open), now);
         assert_eq!(limitado.repos.len(), 2, "solo las dos primeras filas");
         assert_eq!(limitado.repos[0].repo, "atareao/uno");
         assert_eq!(limitado.repos[1].repo, "atareao/dos");
@@ -866,24 +974,161 @@ mod report {
             limitado.repos_with_alerts, 3,
             "los totales reflejan el conjunto completo"
         );
+        assert_eq!(
+            limitado.listed_repos, 3,
+            "los totales reflejan el conjunto completo"
+        );
         assert_eq!(limitado.known_repos, 367);
         assert_eq!(limitado.total_alerts, 9);
 
-        let todas = ReposDocument::from_list(&listado, 7, None, now);
+        let todas = ReposDocument::from_list(&listado, 7, None, filtros(RepoState::Open), now);
         assert_eq!(todas.repos.len(), 3, "sin límite salen todas");
 
-        let cero = ReposDocument::from_list(&listado, 7, Some(0), now);
+        let cero = ReposDocument::from_list(&listado, 7, Some(0), filtros(RepoState::Open), now);
         assert_eq!(cero.repos.len(), 3, "el límite cero equivale a todas");
     }
 
     /// `RepoEntry` y el documento conservan los tipos fuertes de la API.
     #[test]
     fn la_entrada_del_listado_expone_los_tipos_del_documento() {
-        let documento = ReposDocument::from_list(&listado(), 7, None, instante(1_700_000_000));
+        let documento = ReposDocument::from_list(
+            &listado(),
+            7,
+            None,
+            filtros(RepoState::Open),
+            instante(1_700_000_000),
+        );
         let primera: &RepoEntry = &documento.repos[0];
         assert_eq!(primera.repo, "atareao/uno");
         assert_eq!(primera.alerts, 5);
         assert_eq!(primera.by_severity.high, 2);
         assert_eq!(documento.schema_version, REPOS_SCHEMA_VERSION);
+    }
+
+    // --- 2.1/2.2 Documento v2 y las tres presentaciones ---
+
+    /// 2.1 — el documento v2 refleja los filtros aplicados y toma
+    /// `repos_with_alerts` del listado agregado (no de `repos.len()`).
+    #[test]
+    fn el_documento_v2_refleja_los_filtros_y_el_conjunto() {
+        // `repos_with_alerts` (2) difiere a propósito de `repos.len()` (3): el
+        // documento debe copiar el campo del listado, no contar las filas.
+        let conjunto = RepoAlertList {
+            known_repos: 10,
+            repos_with_alerts: 2,
+            repos: listado().repos,
+            total_alerts: 9,
+        };
+        let filtros = ReposFilters {
+            state: RepoState::Resolved,
+            source: Some(AlertSource::Dependabot),
+            min_severity: Some(Severity::High),
+            include_empty: true,
+        };
+        let documento =
+            ReposDocument::from_list(&conjunto, 42, None, filtros, instante(1_700_000_000));
+
+        assert_eq!(documento.schema_version, 2, "el esquema sube a 2");
+        assert_eq!(documento.state, RepoState::Resolved);
+        assert_eq!(documento.source, Some(AlertSource::Dependabot));
+        assert_eq!(documento.min_severity, Some(Severity::High));
+        assert!(documento.include_empty);
+        assert_eq!(documento.listed_repos, 3, "todo el conjunto, pre-límite");
+        assert_eq!(
+            documento.repos_with_alerts, 2,
+            "se copia el campo del listado, no `repos.len()`"
+        );
+        assert_eq!(documento.known_repos, 10);
+        assert_eq!(documento.total_alerts, 9);
+
+        let json = documento.to_json().expect("serializa el listado");
+        let valor: serde_json::Value = serde_json::from_str(&json).expect("JSON válido");
+        assert_eq!(valor["schema_version"], serde_json::json!(2));
+        assert_eq!(valor["state"], serde_json::json!("resolved"));
+        assert_eq!(valor["source"], serde_json::json!("dependabot"));
+        assert_eq!(valor["min_severity"], serde_json::json!("high"));
+        assert_eq!(valor["include_empty"], serde_json::json!(true));
+        assert_eq!(valor["listed_repos"], serde_json::json!(3));
+    }
+
+    /// 2.1 — con `state: All` y sin fuente ni severidad mínima, los filtros se
+    /// serializan como `null` (no hay valor degradado en silencio).
+    #[test]
+    fn el_documento_serializa_los_filtros_ausentes_como_null() {
+        let documento = ReposDocument::from_list(
+            &listado(),
+            7,
+            None,
+            filtros(RepoState::All),
+            instante(1_700_000_000),
+        );
+        let json = documento.to_json().expect("serializa el listado");
+        let valor: serde_json::Value = serde_json::from_str(&json).expect("JSON válido");
+
+        assert_eq!(valor["state"], serde_json::json!("all"));
+        assert_eq!(valor["source"], serde_json::Value::Null);
+        assert_eq!(valor["min_severity"], serde_json::Value::Null);
+        assert_eq!(valor["include_empty"], serde_json::json!(false));
+    }
+
+    /// 2.2 — la cabecera de consola depende del estado consultado y lleva los
+    /// tres totales (`repositorios: L de M`, `con alertas: N`, `…: T`).
+    #[test]
+    fn la_cabecera_de_consola_depende_del_estado() {
+        let listado = listado();
+        let now = instante(1_700_000_000);
+
+        let abiertas =
+            ReposDocument::from_list(&listado, 7, None, filtros(RepoState::Open), now).to_console();
+        assert!(abiertas.contains("alertas abiertas: 9"), "{abiertas}");
+        assert!(abiertas.contains("repositorios: 3 de 367"), "{abiertas}");
+        assert!(abiertas.contains("con alertas: 3"), "{abiertas}");
+
+        let resueltas =
+            ReposDocument::from_list(&listado, 7, None, filtros(RepoState::Resolved), now)
+                .to_console();
+        assert!(resueltas.contains("alertas resueltas: 9"), "{resueltas}");
+        assert!(resueltas.contains("repositorios: 3 de 367"), "{resueltas}");
+        assert!(resueltas.contains("con alertas: 3"), "{resueltas}");
+
+        let todas =
+            ReposDocument::from_list(&listado, 7, None, filtros(RepoState::All), now).to_console();
+        assert!(todas.contains("alertas: 9"), "{todas}");
+        assert!(!todas.contains("alertas abiertas"), "{todas}");
+        assert!(!todas.contains("alertas resueltas"), "{todas}");
+    }
+
+    /// 2.2 — el título Markdown y las viñetas dependen del estado consultado.
+    #[test]
+    fn el_markdown_del_listado_depende_del_estado() {
+        let listado = listado();
+        let now = instante(1_700_000_000);
+
+        let abiertas = ReposDocument::from_list(&listado, 7, None, filtros(RepoState::Open), now)
+            .to_markdown();
+        assert!(
+            abiertas.contains("# Repositorios con alertas abiertas"),
+            "{abiertas}"
+        );
+        assert!(abiertas.contains("- Estado: open"), "{abiertas}");
+
+        let resueltas =
+            ReposDocument::from_list(&listado, 7, None, filtros(RepoState::Resolved), now)
+                .to_markdown();
+        assert!(
+            resueltas.contains("# Repositorios con alertas resueltas"),
+            "{resueltas}"
+        );
+        assert!(resueltas.contains("- Estado: resolved"), "{resueltas}");
+
+        let todas =
+            ReposDocument::from_list(&listado, 7, None, filtros(RepoState::All), now).to_markdown();
+        assert!(todas.contains("# Repositorios y sus alertas"), "{todas}");
+        assert!(todas.contains("- Estado: all"), "{todas}");
+
+        // Las viñetas de totales no dependen del estado.
+        assert!(abiertas.contains("- Repositorios: 3 de 367"), "{abiertas}");
+        assert!(abiertas.contains("- Con alertas: 3"), "{abiertas}");
+        assert!(abiertas.contains("- Alertas: 9"), "{abiertas}");
     }
 }

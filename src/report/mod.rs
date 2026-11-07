@@ -13,7 +13,7 @@
 //!   derivan el Markdown ([`ReportDocument::to_markdown`]) y el JSON
 //!   ([`ReportDocument::to_json`]).
 //! - [`write_reports`]: la escritura del informe en disco.
-//! - [`ReposDocument`]: el listado de repositorios con alertas abiertas, con
+//! - [`ReposDocument`]: el listado de repositorios del conjunto consultado, con
 //!   sus tres salidas ([`ReposDocument::to_console`],
 //!   [`ReposDocument::to_markdown`] y [`ReposDocument::to_json`]).
 //!
@@ -37,7 +37,9 @@ pub use document::{
     SCHEMA_VERSION, SeverityCounts,
 };
 pub use emit::{ReportPaths, write_reports};
-pub use repos::{REPOS_SCHEMA_VERSION, RepoEntry, RepoSeverityCounts, ReposDocument};
+pub use repos::{
+    REPOS_SCHEMA_VERSION, RepoEntry, RepoSeverityCounts, RepoState, ReposDocument, ReposFilters,
+};
 
 /// Error de la generación del informe.
 ///

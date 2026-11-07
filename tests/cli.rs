@@ -1687,7 +1687,7 @@ mod cli {
         assert_eq!(codigo, EXIT_OK);
         let texto = salida.texto();
         assert!(
-            texto.contains("repositorios con alertas: 3 de 3"),
+            texto.contains("repositorios: 3 de 3"),
             "la cabecera cuenta los repositorios: {texto}"
         );
         assert!(
@@ -1721,7 +1721,7 @@ mod cli {
         assert_eq!(codigo, EXIT_OK);
         let texto = salida.texto();
         assert!(
-            texto.contains("repositorios con alertas: 25 de 25"),
+            texto.contains("repositorios: 25 de 25"),
             "la cabecera cuenta los 25: {texto}"
         );
         assert_eq!(
@@ -1809,7 +1809,7 @@ mod cli {
             "el recuento y el desglose no se recortan: {texto}"
         );
         assert!(
-            texto.contains("repositorios con alertas: 2 de 3"),
+            texto.contains("repositorios: 2 de 3"),
             "la cabecera refleja el filtro y los repos conocidos: {texto}"
         );
     }
@@ -1875,7 +1875,7 @@ mod cli {
 
         assert_eq!(codigo, EXIT_OK);
         let valor: Value = serde_json::from_str(salida.texto().trim()).expect("JSON válido");
-        assert_eq!(valor["schema_version"], 1);
+        assert_eq!(valor["schema_version"], 2);
         assert_eq!(valor["repos"][0]["repo"], "atareao/uno");
     }
 
@@ -1908,7 +1908,7 @@ mod cli {
         assert_eq!(codigo, EXIT_OK);
         let texto = salida.texto();
         assert!(
-            texto.contains("# Repositorios con alertas"),
+            texto.contains("# Repositorios con alertas abiertas"),
             "falta la cabecera Markdown: {texto}"
         );
         assert!(
@@ -1931,8 +1931,8 @@ mod cli {
 
         assert_eq!(codigo, EXIT_OK);
         assert!(
-            salida.texto().contains("sin repositorios con alertas"),
-            "informa de que no hay repositorios con alertas: {}",
+            salida.texto().contains("sin repositorios que mostrar"),
+            "informa de que no hay repositorios que mostrar: {}",
             salida.texto()
         );
     }

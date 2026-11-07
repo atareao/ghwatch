@@ -50,7 +50,9 @@ use crate::notify::{
     EmitOutcome, NotifyOutcome, ValetClient, ValetConfig, emit_and_notify, send_document,
 };
 use crate::osv::{OsvClient, OsvConfig};
-use crate::report::{HISTORY_EN_INFORME, ReportDocument, ReposDocument, SCHEMA_VERSION};
+use crate::report::{
+    HISTORY_EN_INFORME, RepoState, ReportDocument, ReposDocument, ReposFilters, SCHEMA_VERSION,
+};
 use crate::scan::{
     HiddenReporter, IndicatifReporter, ProgressReporter, scan, scan_with_enrichment,
 };
@@ -692,7 +694,15 @@ async fn ejecutar_repos(args: ReposArgs, env: &mut Env) -> u8 {
 
     // `--all` es azúcar de `--limit 0` y prevalece si se combinan.
     let limit = if args.all { None } else { Some(args.limit) };
-    let documento = ReposDocument::from_list(&listado, run_id, limit, env.now);
+    // El estado es siempre `open` mientras las opciones `--state`/`--source`/
+    // `--include-empty` no existen (llegan en la sección 3 del change).
+    let filtros = ReposFilters {
+        state: RepoState::Open,
+        source: None,
+        min_severity: args.min_severity.map(MinSeverity::severity),
+        include_empty: false,
+    };
+    let documento = ReposDocument::from_list(&listado, run_id, limit, filtros, env.now);
 
     let texto = match args.format {
         OutputFormat::Console => documento.to_console(),

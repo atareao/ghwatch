@@ -22,11 +22,19 @@
 
 ## 2. Documento del listado (esquema 2) y las tres presentaciones
 
-- [ ] 2.1 RED — escribir en `tests/report.rs` (dentro de `mod report`) los tests del documento v2: `state`, `source`, `min_severity`, `include_empty`, `listed_repos` y `repos_with_alerts`; comando `cargo test report`; pegar la salida en rojo.
-- [ ] 2.2 RED — escribir los tests de la cabecera de consola según el estado (abiertas/resueltas/todas), del listado vacío (`sin repositorios que mostrar`) y de la tabla Markdown con el estado consultado; comando `cargo test report`; pegar la salida en rojo.
-- [ ] 2.3 GREEN — implementar el enum `RepoState`, los campos nuevos de `ReposDocument` (subiendo `REPOS_SCHEMA_VERSION` a 2) y las tres presentaciones; confirmar con `cargo test report`.
-- [ ] 2.4 REFACTOR — doc-comments (semántica de los cuatro totales) y puerta de calidad del módulo.
-- [ ] 2.5 Auditoría con `@rust-reviewer` del documento y de las tres presentaciones.
+- [x] 2.1 RED — escribir en `tests/report.rs` (dentro de `mod report`) los tests del documento v2: `state`, `source`, `min_severity`, `include_empty`, `listed_repos` y `repos_with_alerts`; comando `cargo test report`; pegar la salida en rojo.
+- [x] 2.2 RED — escribir los tests de la cabecera de consola según el estado (abiertas/resueltas/todas), del listado vacío (`sin repositorios que mostrar`) y de la tabla Markdown con el estado consultado; comando `cargo test report`; pegar la salida en rojo.
+- [x] 2.3 GREEN — implementar el enum `RepoState`, los campos nuevos de `ReposDocument` (subiendo `REPOS_SCHEMA_VERSION` a 2) y las tres presentaciones; confirmar con `cargo test report`.
+- [x] 2.4 REFACTOR — doc-comments (semántica de los cuatro totales) y puerta de calidad del módulo.
+- [x] 2.5 Auditoría con `@rust-reviewer` del documento y de las tres presentaciones.
+
+### 2.6 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la sección 2 (veredicto: aprobado con reservas).
+
+- [x] 2.6.1 Hallazgo 1 — el delta de `reporting` acota «los filtros aplicados» al documento JSON (el estado sí va en los tres formatos), en coherencia con la decisión 5 del diseño. Verificación: `openspec validate cli-repos-extended --strict`.
+- [x] 2.6.2 Hallazgo 3 — test del orden de las claves del contrato JSON. Verificación: `cargo test report`.
+- [x] 2.6.3 Hallazgo 4 — el assert del título Markdown en el CLI se estrecha a `# Repositorios con alertas abiertas`. Verificación: `cargo test cli`.
 
 ## 3. Subcomando: `--output`, `--include-empty`, `--source` y `--state`
 
