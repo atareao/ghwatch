@@ -54,7 +54,7 @@ use crate::report::{HISTORY_EN_INFORME, ReportDocument, ReposDocument, SCHEMA_VE
 use crate::scan::{
     HiddenReporter, IndicatifReporter, ProgressReporter, scan, scan_with_enrichment,
 };
-use crate::store::Store;
+use crate::store::{RepoQuery, Store};
 
 /// Salida correcta.
 pub const EXIT_OK: u8 = 0;
@@ -665,10 +665,17 @@ async fn ejecutar_repos(args: ReposArgs, env: &mut Env) -> u8 {
         Err(codigo) => return codigo,
     };
 
-    let listado = match store
-        .repo_alert_counts(args.min_severity.map(MinSeverity::severity))
-        .await
-    {
+    // Adaptación mínima de la sección 1 del change `cli-repos-extended`:
+    // preserva el comportamiento actual (solo alertas abiertas) mientras la
+    // firma de `repo_alert_counts` pasa a `&RepoQuery`. Las opciones nuevas
+    // (`--state`, `--source`, `--include-empty`) llegan en la sección 3.
+    let consulta = RepoQuery {
+        state: Some(crate::domain::AlertState::Open),
+        min_severity: args.min_severity.map(MinSeverity::severity),
+        ..RepoQuery::default()
+    };
+
+    let listado = match store.repo_alert_counts(&consulta).await {
         Ok(listado) => listado,
         Err(error) => {
             tracing::error!(error = %error, "no se pudieron contar las alertas por repositorio");

@@ -2,16 +2,23 @@
 
 ## 0. Aprobación (punto de parada del protocolo)
 
-- [ ] 0.1 Presentar este change (proposal + specs + design + tasks) y esperar aprobación explícita antes de tocar código.
+- [x] 0.1 Presentar este change (proposal + specs + design + tasks) y esperar aprobación explícita antes de tocar código.
 
 ## 1. Consulta agregada: estado, fuente y repositorios sin alertas
 
-- [ ] 1.1 RED — escribir en `tests/store.rs` (dentro de `mod store`) los tests de `RepoQuery`: estado (`open`/`resolved`/`all`), fuente (`dependabot`/`secret`/`code`) e `include_empty`, sobre una base en memoria; comando `cargo test store`; pegar la salida en rojo.
-- [ ] 1.2 RED — escribir el test del repositorio sin alertas: con `include_empty` aparece con `alerts = 0` y los cinco cubos a cero (guardianes `COUNT(a.id)`, `a.id IS NOT NULL` y `COALESCE(MAX(...), 0)`); sin `include_empty` no aparece; comando `cargo test store`; pegar la salida en rojo.
-- [ ] 1.3 RED — escribir el test de `repos_with_alerts` (cuenta solo los repositorios con al menos una alerta) y del orden con repositorios vacíos (van al final, por nombre ascendente); comando `cargo test store`; pegar la salida en rojo.
-- [ ] 1.4 GREEN — implementar en `src/store/query.rs` el tipo `RepoQuery` y la consulta con `LEFT JOIN` sobre `repos`, los tres guardianes y el `HAVING` acumulativo; añadir `repos_with_alerts` a `RepoAlertList`; confirmar con `cargo test store` y `cargo check`.
-- [ ] 1.5 REFACTOR — doc-comments (la trampa del `LEFT JOIN` y la semántica de `repos_with_alerts`); confirmar `cargo clippy --all-targets -- -D warnings` y `cargo fmt --all --check`.
-- [ ] 1.6 Auditoría con `@rust-reviewer` de la consulta y de su cobertura.
+- [x] 1.1 RED — escribir en `tests/store.rs` (dentro de `mod store`) los tests de `RepoQuery`: estado (`open`/`resolved`/`all`), fuente (`dependabot`/`secret`/`code`) e `include_empty`, sobre una base en memoria; comando `cargo test store`; pegar la salida en rojo.
+- [x] 1.2 RED — escribir el test del repositorio sin alertas: con `include_empty` aparece con `alerts = 0` y los cinco cubos a cero (guardianes `COUNT(a.id)`, `a.id IS NOT NULL` y `COALESCE(MAX(...), 0)`); sin `include_empty` no aparece; comando `cargo test store`; pegar la salida en rojo.
+- [x] 1.3 RED — escribir el test de `repos_with_alerts` (cuenta solo los repositorios con al menos una alerta) y del orden con repositorios vacíos (van al final, por nombre ascendente); comando `cargo test store`; pegar la salida en rojo.
+- [x] 1.4 GREEN — implementar en `src/store/query.rs` el tipo `RepoQuery` y la consulta con `LEFT JOIN` sobre `repos`, los tres guardianes y el `HAVING` acumulativo; añadir `repos_with_alerts` a `RepoAlertList`; confirmar con `cargo test store` y `cargo check`.
+- [x] 1.5 REFACTOR — doc-comments (la trampa del `LEFT JOIN` y la semántica de `repos_with_alerts`); confirmar `cargo clippy --all-targets -- -D warnings` y `cargo fmt --all --check`.
+- [x] 1.6 Auditoría con `@rust-reviewer` de la consulta y de su cobertura.
+
+### 1.7 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la sección 1 (veredicto: aprobado con reservas).
+
+- [x] 1.7.1 Hallazgo 1 — el doc-comment de `repo_alert_counts` documenta la precondición del `LEFT JOIN` (alertas huérfanas). Verificación: `cargo test store`.
+- [x] 1.7.2 Hallazgo 3 — se elimina el sombreo del helper `abiertas` en `tests/store.rs`. Verificación: `cargo test store`.
 
 ## 2. Documento del listado (esquema 2) y las tres presentaciones
 

@@ -106,34 +106,63 @@ pub struct Diff {
     pub resolved: Vec<StoredAlert>,
 }
 
-/// Recuento de alertas abiertas de un repositorio.
+/// Recuento de alertas de un repositorio dentro del **conjunto consultado**.
+///
+/// Los cubos describen el estado y la fuente pedidos en [`RepoQuery`], de modo
+/// que no son necesariamente alertas «abiertas».
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoAlertCount {
     /// Repositorio (`owner/name`).
     pub repo: String,
-    /// Alertas abiertas del repositorio.
+    /// Alertas del repositorio en el conjunto consultado.
     pub alerts: i64,
-    /// Alertas abiertas de severidad crítica.
+    /// Alertas de severidad crítica.
     pub critical: i64,
-    /// Alertas abiertas de severidad alta.
+    /// Alertas de severidad alta.
     pub high: i64,
-    /// Alertas abiertas de severidad media.
+    /// Alertas de severidad media.
     pub medium: i64,
-    /// Alertas abiertas de severidad baja.
+    /// Alertas de severidad baja.
     pub low: i64,
-    /// Alertas abiertas sin severidad conocida (incluye las de severidad nula).
+    /// Alertas sin severidad conocida (incluye las de severidad nula).
     pub unknown: i64,
 }
 
-/// Listado agregado de alertas abiertas por repositorio.
+/// Listado agregado de alertas por repositorio.
+///
+/// Los recuentos y el desglose describen el **conjunto consultado** (el estado
+/// y la fuente pedidos en [`RepoQuery`]), no necesariamente alertas «abiertas».
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoAlertList {
-    /// Repositorios conocidos (filas de la tabla `repos`).
+    /// Repositorios conocidos (filas de la tabla `repos`), al margen de los filtros.
     pub known_repos: i64,
-    /// Repositorios con al menos una alerta abierta, ya ordenados.
+    /// Repositorios del conjunto con al menos una alerta (los `alerts > 0`).
+    pub repos_with_alerts: i64,
+    /// Repositorios del conjunto, ya ordenados.
     pub repos: Vec<RepoAlertCount>,
-    /// Suma de las alertas abiertas de `repos`.
+    /// Suma de las alertas del conjunto.
     pub total_alerts: i64,
+}
+
+/// Filtros de la agregación de alertas por repositorio.
+///
+/// `None` en `state` y `source` significa «sin filtro» (todos los estados /
+/// todas las fuentes). `min_severity` a `None` equivale a [`Severity::Unknown`]
+/// (sin mínimo). `include_empty` añade los repositorios del inventario sin
+/// ninguna alerta.
+///
+/// El [`Default`] derivado equivale a «sin filtro»: todos los estados, todas
+/// las fuentes, sin severidad mínima y sin repositorios vacíos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RepoQuery {
+    /// Estado de las alertas contadas (`None` = todos).
+    pub state: Option<AlertState>,
+    /// Fuente de las alertas contadas (`None` = todas).
+    pub source: Option<AlertSource>,
+    /// Severidad mínima (conserva el repositorio con ≥1 alerta de esa severidad o superior).
+    pub min_severity: Option<Severity>,
+    /// Incluye los repositorios sin ninguna alerta.
+    pub include_empty: bool,
 }
 
 impl Store {
@@ -314,55 +343,86 @@ impl Store {
         filas.into_iter().map(fila_a_alerta).collect()
     }
 
-    /// Recuento de alertas abiertas por repositorio.
+    /// Recuento de alertas por repositorio según los filtros de [`RepoQuery`].
     ///
-    /// Devuelve **todos** los repositorios con al menos una alerta abierta,
-    /// ordenados por número de alertas descendente y, a igualdad, por nombre
-    /// ascendente (el desempate es explícito en el `ORDER BY`, no se delega en
-    /// el plan de ejecución). `min_severity` conserva solo los repositorios con
-    /// al menos una alerta abierta de esa severidad o superior, sin recortar el
-    /// recuento ni el desglose que se devuelven de cada repositorio.
+    /// Parte del **inventario** (`repos`) con un `LEFT JOIN` sobre `alerts`, de
+    /// modo que `include_empty` puede devolver repositorios sin ninguna alerta.
+    /// Devuelve todos los repositorios que pasan los filtros, ordenados por
+    /// número de alertas descendente y, a igualdad, por nombre ascendente (el
+    /// desempate es explícito en el `ORDER BY`, no se delega en el plan de
+    /// ejecución). `min_severity` conserva solo los repositorios con al menos
+    /// una alerta de esa severidad o superior, sin recortar el recuento ni el
+    /// desglose que se devuelven de cada repositorio.
     ///
-    /// La instantánea se compone de **dos lecturas** (la agregación de `alerts` y
-    /// el `COUNT(*)` de `repos`) que **no comparten transacción**: entre ambas
-    /// podría colarse una escritura. En un CLI de solo lectura local el riesgo es
-    /// despreciable y no justifica envolverlas en una transacción.
+    /// Precondición: toda fila de `alerts` apunta a un repositorio presente en
+    /// `repos` (el esquema no impone clave foránea y `persist` nunca borra de
+    /// `repos`). Una alerta huérfana quedaría fuera del listado sin aviso.
+    ///
+    /// El `LEFT JOIN` introduce tres trampas que la consulta evita de forma
+    /// explícita:
+    ///
+    /// 1. El recuento es `COUNT(a.id)`, **no** `COUNT(*)`: la fila sin
+    ///    coincidencia del `LEFT JOIN` tiene `a.*` nulo y `COUNT(*)` daría 1.
+    /// 2. El cubo `unknown` exige `a.id IS NOT NULL`: sin ese guardián, la fila
+    ///    sin coincidencia (`severity IS NULL`) contaría como desconocida y se
+    ///    rompería el invariante `critical+high+medium+low+unknown == alerts`.
+    /// 3. El `HAVING` envuelve el `MAX(...)` en `COALESCE(..., 0)`: sin
+    ///    coincidencia `MAX` es `NULL` y `NULL >= ?` es `NULL` (falso), así que
+    ///    un repositorio vacío no pasaría el filtro cuando no hay severidad
+    ///    mínima.
+    ///
+    /// La instantánea se compone de **dos lecturas** (la agregación y el
+    /// `COUNT(*)` de `repos`) que **no comparten transacción**: entre ambas
+    /// podría colarse una escritura. En un CLI de solo lectura local el riesgo
+    /// es despreciable y no justifica envolverlas en una transacción.
     ///
     /// # Errores
     ///
     /// Devuelve [`StoreError`] si falla la consulta.
-    pub async fn repo_alert_counts(
-        &self,
-        min_severity: Option<Severity>,
-    ) -> Result<RepoAlertList, StoreError> {
+    pub async fn repo_alert_counts(&self, query: &RepoQuery) -> Result<RepoAlertList, StoreError> {
         // Los literales de severidad de esta consulta y el mapeo 4/3/2/1/0 del
         // `HAVING` **deben** coincidir con `Severity::as_str()` y
         // `Severity::rank()` (src/domain/alert.rs): no los hagas divergir. El
         // bucket `unknown` recoge cualquier valor fuera del conjunto (y `NULL`),
         // porque `severity` es `TEXT` sin `CHECK` y podría albergar una variante
         // ajena: así el invariante `critical+high+medium+low+unknown == alerts`
-        // se mantiene pase lo que pase.
+        // se mantiene pase lo que pase. El guardián `a.id IS NOT NULL` evita que
+        // la fila nula del `LEFT JOIN` (repositorio sin alertas) cuente como
+        // desconocida, y `COUNT(a.id)` evita que cuente como una alerta.
         let filas: Vec<FilaRecuentoRepo> = sqlx::query_as(
-            "SELECT repo, COUNT(*) AS alerts, \
-               SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END), \
-               SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END), \
-               SUM(CASE WHEN severity = 'medium' THEN 1 ELSE 0 END), \
-               SUM(CASE WHEN severity = 'low' THEN 1 ELSE 0 END), \
-               SUM(CASE WHEN severity IS NULL \
-                 OR severity NOT IN ('critical','high','medium','low') \
+            "SELECT r.name_with_owner AS repo, \
+               COUNT(a.id) AS alerts, \
+               SUM(CASE WHEN a.severity = 'critical' THEN 1 ELSE 0 END), \
+               SUM(CASE WHEN a.severity = 'high' THEN 1 ELSE 0 END), \
+               SUM(CASE WHEN a.severity = 'medium' THEN 1 ELSE 0 END), \
+               SUM(CASE WHEN a.severity = 'low' THEN 1 ELSE 0 END), \
+               SUM(CASE WHEN a.id IS NOT NULL \
+                 AND (a.severity IS NULL \
+                      OR a.severity NOT IN ('critical','high','medium','low')) \
                  THEN 1 ELSE 0 END) \
-             FROM alerts WHERE state = 'open' \
-             GROUP BY repo \
-             HAVING MAX(CASE severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 \
-               WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END) >= ?1 \
-             ORDER BY COUNT(*) DESC, repo ASC",
+             FROM repos r \
+             LEFT JOIN alerts a \
+                    ON a.repo = r.name_with_owner \
+                   AND (?1 IS NULL OR a.state = ?1) \
+                   AND (?2 IS NULL OR a.source = ?2) \
+             GROUP BY r.name_with_owner \
+             HAVING (?3 = 1 OR COUNT(a.id) > 0) \
+                AND COALESCE(MAX(CASE a.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 \
+                                        WHEN 'medium' THEN 2 WHEN 'low' THEN 1 \
+                                        ELSE 0 END), 0) >= ?4 \
+             ORDER BY COUNT(a.id) DESC, r.name_with_owner ASC",
         )
-        .bind(min_severity.map_or(0, Severity::rank))
+        .bind(query.state.map(AlertState::as_str))
+        .bind(query.source.map(AlertSource::as_str))
+        .bind(i64::from(query.include_empty))
+        .bind(query.min_severity.map_or(0, Severity::rank))
         .fetch_all(self.pool())
         .await?;
 
         let repos: Vec<RepoAlertCount> = filas.into_iter().map(fila_a_recuento).collect();
         let total_alerts = repos.iter().map(|repo| repo.alerts).sum();
+        let repos_with_alerts =
+            i64::try_from(repos.iter().filter(|repo| repo.alerts > 0).count()).unwrap_or(i64::MAX);
 
         let known_repos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repos")
             .fetch_one(self.pool())
@@ -370,6 +430,7 @@ impl Store {
 
         Ok(RepoAlertList {
             known_repos,
+            repos_with_alerts,
             repos,
             total_alerts,
         })

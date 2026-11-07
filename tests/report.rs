@@ -618,6 +618,7 @@ mod report {
     fn listado() -> RepoAlertList {
         RepoAlertList {
             known_repos: 367,
+            repos_with_alerts: 3,
             repos: vec![
                 RepoAlertCount {
                     repo: "atareao/uno".to_string(),
@@ -685,6 +686,7 @@ mod report {
     fn la_consola_del_listado_vacio_avisa_de_que_no_hay_repositorios() {
         let vacio = RepoAlertList {
             known_repos: 10,
+            repos_with_alerts: 0,
             repos: Vec::new(),
             total_alerts: 0,
         };
@@ -727,6 +729,7 @@ mod report {
     fn el_markdown_del_listado_vacio_emite_la_fila_ninguno() {
         let vacio = RepoAlertList {
             known_repos: 10,
+            repos_with_alerts: 0,
             repos: Vec::new(),
             total_alerts: 0,
         };
@@ -775,6 +778,7 @@ mod report {
     fn el_json_del_listado_vacio_tiene_una_lista_de_repositorios_vacia() {
         let vacio = RepoAlertList {
             known_repos: 10,
+            repos_with_alerts: 0,
             repos: Vec::new(),
             total_alerts: 0,
         };
