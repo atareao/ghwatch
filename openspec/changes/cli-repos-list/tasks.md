@@ -61,10 +61,10 @@
 
 ## 4. Documentación
 
-- [ ] 4.1 Actualizar `AGENTS.md` (los siete subcomandos y el módulo nuevo) y verificar que la lista coincide con la salida de `ghwatch --help`.
-- [ ] 4.2 Actualizar `PLAN.md` con el subcomando `repos` y verificar que no contradice la sección de modelo de datos.
-- [ ] 4.3 Actualizar `README.md` y `README.es.md` con el subcomando `repos` y un ejemplo de salida; verificar que el ejemplo, ejecutado contra la base real, produce esa forma.
-- [ ] 4.4 Crear `docs/cli-repos-list.md` (qué es, ficheros implicados, cómo funciona, variables y configuración, cómo usarlo, decisiones y follow-ups) y verificar que todos los comandos que cita funcionan tal cual.
+- [x] 4.1 Actualizar `AGENTS.md` (los siete subcomandos y el módulo nuevo) y verificar que la lista coincide con la salida de `ghwatch --help`.
+- [x] 4.2 Actualizar `PLAN.md` con el subcomando `repos` y verificar que no contradice la sección de modelo de datos.
+- [x] 4.3 Actualizar `README.md` y `README.es.md` con el subcomando `repos` y un ejemplo de salida; verificar que el ejemplo, ejecutado contra la base real, produce esa forma.
+- [x] 4.4 Crear `docs/cli-repos-list.md` (qué es, ficheros implicados, cómo funciona, variables y configuración, cómo usarlo, decisiones y follow-ups) y verificar que todos los comandos que cita funcionan tal cual.
 
 ## 5. Verificación final
 
