@@ -1,4 +1,32 @@
 # Changelog
+## [0.2.0] - 2026-11-07
+
+### Documentation
+
+- *(openspec)* Proponer el change cli-repos-list
+- *(cli-repos-list)* Documentar el subcomando `repos`
+- *(openspec)* Archivar el change cli-repos-list
+- *(openspec)* Change `cli-repos-extended` (extensiones de `repos`)
+- *(repos)* Documentar las cuatro opciones nuevas del listado
+- *(openspec)* Archivar `cli-repos-extended` y cerrar el relevo
+
+### Features
+
+- *(store)* Agregación de alertas abiertas por repositorio
+- *(report)* Presentación del listado de repositorios
+- *(cli)* Subcomando `repos` para listar repositorios con alertas
+- *(store)* Filtrar la agregación de repos por estado, fuente y repositorios vacíos
+- *(report)* Documento del listado en esquema 2 con estado y filtros
+- *(cli)* `repos` acepta `--output`, `--include-empty`, `--source` y `--state`
+
+### Miscellaneous Tasks
+
+- *(ci)* Subir las acciones al runtime Node.js 24
+
+### Testing
+
+- *(cli-repos-list)* Verificación final y cierre del hueco de la base ilegible
+- *(repos)* Cerrar las casillas de la verificación final del change
 ## [0.1.0] - 2026-11-05
 
 ### Bug Fixes

@@ -1,10 +1,10 @@
 //! Superficie de línea de comandos y capa de ejecución.
 //!
-//! Este módulo define los seis subcomandos (`scan`, `report`, `diff`, `history`,
-//! `notify` e `init`) con `clap` y traduce cada uno a la lógica de las fases
-//! anteriores. La ejecución **no** lee el entorno del proceso, ni `$HOME`, ni el
-//! reloj: todo eso se inyecta a través de [`Env`], de modo que el flujo completo
-//! es determinista y comprobable sin red y sin credenciales reales.
+//! Este módulo define los siete subcomandos (`scan`, `report`, `diff`, `history`,
+//! `repos`, `notify` e `init`) con `clap` y traduce cada uno a la lógica de las
+//! fases anteriores. La ejecución **no** lee el entorno del proceso, ni `$HOME`,
+//! ni el reloj: todo eso se inyecta a través de [`Env`], de modo que el flujo
+//! completo es determinista y comprobable sin red y sin credenciales reales.
 //!
 //! # Códigos de salida
 //!
@@ -20,7 +20,7 @@
 //!
 //! `scan` y `notify` escriben **siempre** el informe antes de notificar: el
 //! envío a Valet es best-effort y nunca altera el código de salida. Los
-//! subcomandos de consulta (`report`, `diff`, `history`) leen solo del
+//! subcomandos de consulta (`report`, `diff`, `history`, `repos`) leen solo del
 //! almacenamiento local —base de datos y ficheros de informe— y no resuelven
 //! credenciales ni contactan con GitHub; `notify` tampoco reescribe el informe,
 //! solo envía a Valet el documento ya escrito.
@@ -42,6 +42,8 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 use crate::auth::{self, AuthError, Token};
 use crate::config::{self, ConfigFlags, ResolvedConfig};
+use crate::domain::alert::{AlertSource, Severity};
+use crate::domain::drift::AlertState;
 use crate::github::GithubError;
 use crate::github::client::{GithubClient, GithubConfig};
 use crate::github::repos::RepoSelection;
@@ -49,11 +51,13 @@ use crate::notify::{
     EmitOutcome, NotifyOutcome, ValetClient, ValetConfig, emit_and_notify, send_document,
 };
 use crate::osv::{OsvClient, OsvConfig};
-use crate::report::{HISTORY_EN_INFORME, ReportDocument, SCHEMA_VERSION};
+use crate::report::{
+    HISTORY_EN_INFORME, RepoState, ReportDocument, ReposDocument, ReposFilters, SCHEMA_VERSION,
+};
 use crate::scan::{
     HiddenReporter, IndicatifReporter, ProgressReporter, scan, scan_with_enrichment,
 };
-use crate::store::Store;
+use crate::store::{RepoQuery, Store};
 
 /// Salida correcta.
 pub const EXIT_OK: u8 = 0;
@@ -151,6 +155,8 @@ pub enum Command {
     Diff(CommonArgs),
     /// Muestra la serie histórica almacenada.
     History(HistoryArgs),
+    /// Lista los repositorios con sus alertas.
+    Repos(ReposArgs),
     /// Reenvía el último informe local a Valet.
     Notify(NotifyArgs),
     /// Crea la base de datos y la plantilla de configuración.
@@ -213,6 +219,99 @@ pub enum OutputFormat {
     Json,
 }
 
+/// Severidad mínima del filtro de `repos`.
+///
+/// Es un `ValueEnum` propio del CLI: `Severity` vive en `domain` (puro) y no
+/// debe conocer el parseo de la línea de comandos. Un valor fuera del conjunto
+/// es un error de uso (código 2), no un `Unknown` silencioso.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum MinSeverity {
+    /// Solo repositorios con alguna alerta crítica.
+    Critical,
+    /// Repositorios con alguna alerta alta o crítica.
+    High,
+    /// Repositorios con alguna alerta media, alta o crítica.
+    Medium,
+    /// Repositorios con alguna alerta baja, media, alta o crítica.
+    Low,
+    /// Todos los repositorios con alertas.
+    Unknown,
+}
+
+impl MinSeverity {
+    /// Severidad del dominio equivalente.
+    #[must_use]
+    pub fn severity(self) -> Severity {
+        match self {
+            Self::Critical => Severity::Critical,
+            Self::High => Severity::High,
+            Self::Medium => Severity::Medium,
+            Self::Low => Severity::Low,
+            Self::Unknown => Severity::Unknown,
+        }
+    }
+}
+
+/// Fuente de alertas del filtro de `repos`.
+///
+/// Es un `ValueEnum` propio del CLI: `AlertSource` vive en `domain` (puro) y no
+/// debe conocer el parseo de la línea de comandos. Un valor fuera del conjunto
+/// es un error de uso (código 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SourceFilter {
+    /// Alertas de Dependabot.
+    Dependabot,
+    /// Alertas de secret scanning.
+    Secret,
+    /// Alertas de code scanning.
+    Code,
+}
+
+impl SourceFilter {
+    /// Fuente del dominio equivalente.
+    #[must_use]
+    pub fn source(self) -> AlertSource {
+        match self {
+            Self::Dependabot => AlertSource::Dependabot,
+            Self::Secret => AlertSource::Secret,
+            Self::Code => AlertSource::Code,
+        }
+    }
+}
+
+/// Estado de las alertas del filtro de `repos`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum StateFilter {
+    /// Solo alertas abiertas.
+    Open,
+    /// Solo alertas resueltas.
+    Resolved,
+    /// Abiertas y resueltas.
+    All,
+}
+
+impl StateFilter {
+    /// Estado del dominio (`None` = todos, para `RepoQuery`).
+    #[must_use]
+    pub fn alert_state(self) -> Option<AlertState> {
+        match self {
+            Self::Open => Some(AlertState::Open),
+            Self::Resolved => Some(AlertState::Resolved),
+            Self::All => None,
+        }
+    }
+
+    /// Estado de la presentación.
+    #[must_use]
+    pub fn repo_state(self) -> RepoState {
+        match self {
+            Self::Open => RepoState::Open,
+            Self::Resolved => RepoState::Resolved,
+            Self::All => RepoState::All,
+        }
+    }
+}
+
 /// Argumentos de `report`.
 #[derive(Debug, Clone, Args)]
 pub struct ReportArgs {
@@ -250,6 +349,41 @@ pub struct HistoryArgs {
     /// Número máximo de ejecuciones a mostrar.
     #[arg(long, default_value_t = 20)]
     pub limit: usize,
+}
+
+/// Argumentos de `repos`.
+#[derive(Debug, Clone, Args)]
+pub struct ReposArgs {
+    /// Ruta de la base de datos.
+    #[arg(long)]
+    pub db: Option<PathBuf>,
+    /// Ruta del fichero de configuración.
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+    /// Número máximo de repositorios a mostrar (`0` = todos).
+    #[arg(long, default_value_t = 20)]
+    pub limit: usize,
+    /// Muestra todos los repositorios (equivale a `--limit 0`).
+    #[arg(long)]
+    pub all: bool,
+    /// Conserva solo los repositorios con al menos una alerta de esta severidad o superior.
+    #[arg(long, value_enum)]
+    pub min_severity: Option<MinSeverity>,
+    /// Incluye los repositorios sin ninguna alerta.
+    #[arg(long)]
+    pub include_empty: bool,
+    /// Cuenta solo las alertas de esta fuente.
+    #[arg(long, value_enum)]
+    pub source: Option<SourceFilter>,
+    /// Estado de las alertas contadas.
+    #[arg(long, value_enum, default_value_t = StateFilter::Open)]
+    pub state: StateFilter,
+    /// Formato de la salida.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Console)]
+    pub format: OutputFormat,
+    /// Escribe la salida en este fichero en lugar de la salida estándar.
+    #[arg(long)]
+    pub output: Option<PathBuf>,
 }
 
 /// Argumentos de `notify`.
@@ -296,6 +430,7 @@ pub async fn run_with(cli: Cli, mut env: Env) -> u8 {
         Command::Report(args) => ejecutar_report(args, &mut env).await,
         Command::Diff(args) => ejecutar_diff(args, &mut env).await,
         Command::History(args) => ejecutar_history(args, &mut env).await,
+        Command::Repos(args) => ejecutar_repos(args, &mut env).await,
         Command::Notify(args) => ejecutar_notify(args, &mut env).await,
         Command::Init(args) => ejecutar_init(args, &mut env).await,
     }
@@ -583,6 +718,106 @@ async fn ejecutar_history(args: HistoryArgs, env: &mut Env) -> u8 {
     if let Err(error) = emitir(env, &texto) {
         tracing::error!(error = %error, "no se pudo escribir el histórico");
         return EXIT_STORE;
+    }
+    EXIT_OK
+}
+
+/// Ejecuta `repos`.
+///
+/// Consulta la base de datos (sin abrirla si no existe, sin crearla) y compone
+/// el listado de repositorios con sus alertas —en el estado y de la fuente
+/// pedidos— en el formato elegido. Es una consulta local: no resuelve
+/// credenciales ni contacta con la red. Con `--output`, la salida formateada va
+/// al fichero indicado y no a la salida estándar; sin él, a la salida estándar.
+///
+/// Convención de bytes: el fichero reproduce **exactamente** los mismos bytes
+/// que la salida estándar, es decir, el texto formateado seguido de un `\n`
+/// (la salida estándar lo añade con `writeln!`). Así una redirección a fichero
+/// y `--output` son intercambiables.
+async fn ejecutar_repos(args: ReposArgs, env: &mut Env) -> u8 {
+    let flags = ConfigFlags {
+        db_path: args.db,
+        ..ConfigFlags::default()
+    };
+    let config = resolver_config(&flags, args.config.as_deref(), env);
+
+    let store = match abrir_store_si_existe(&config.db_path).await {
+        Ok(Some(store)) => store,
+        Ok(None) => return emitir_sin_datos(env, "sin datos locales (ejecuta `ghwatch scan`)"),
+        Err(codigo) => return codigo,
+    };
+
+    // Los ejes del filtro se calculan una sola vez y se reutilizan tanto en la
+    // consulta al almacén como en el documento de presentación.
+    let source = args.source.map(SourceFilter::source);
+    let min_severity = args.min_severity.map(MinSeverity::severity);
+    let include_empty = args.include_empty;
+
+    let consulta = RepoQuery {
+        state: args.state.alert_state(),
+        source,
+        min_severity,
+        include_empty,
+    };
+
+    let listado = match store.repo_alert_counts(&consulta).await {
+        Ok(listado) => listado,
+        Err(error) => {
+            tracing::error!(error = %error, "no se pudieron contar las alertas por repositorio");
+            return EXIT_STORE;
+        }
+    };
+    let run_id = match store.latest_run_id().await {
+        Ok(run_id) => run_id.unwrap_or(0),
+        Err(error) => {
+            tracing::error!(error = %error, "no se pudo leer la última ejecución");
+            return EXIT_STORE;
+        }
+    };
+
+    // `--all` es azúcar de `--limit 0` y prevalece si se combinan.
+    let limit = if args.all { None } else { Some(args.limit) };
+    let filtros = ReposFilters {
+        state: args.state.repo_state(),
+        source,
+        min_severity,
+        include_empty,
+    };
+    let documento = ReposDocument::from_list(&listado, run_id, limit, filtros, env.now);
+
+    let texto = match args.format {
+        OutputFormat::Console => documento.to_console(),
+        OutputFormat::Markdown => documento.to_markdown(),
+        OutputFormat::Json => match documento.to_json() {
+            Ok(texto) => texto,
+            Err(error) => {
+                tracing::error!(error = %error, "no se pudo serializar el listado a JSON");
+                return EXIT_STORE;
+            }
+        },
+    };
+
+    match args.output {
+        // `--output` escribe el fichero y **no** emite por la salida estándar.
+        // Un fallo de escritura es un fallo local: no se crean directorios
+        // intermedios, así que una carpeta inexistente es un error.
+        Some(ruta) => {
+            // El fichero lleva el mismo `\n` final que `emitir` añade por stdout.
+            if let Err(error) = std::fs::write(&ruta, format!("{texto}\n")) {
+                tracing::error!(
+                    path = %ruta.display(),
+                    error = %error,
+                    "no se pudo escribir el listado en el fichero de salida"
+                );
+                return EXIT_STORE;
+            }
+        }
+        None => {
+            if let Err(error) = emitir(env, &texto) {
+                tracing::error!(error = %error, "no se pudo escribir el listado de repositorios");
+                return EXIT_STORE;
+            }
+        }
     }
     EXIT_OK
 }
@@ -991,14 +1226,15 @@ fn resumen_documento(documento: &ReportDocument) -> String {
 mod tests {
     use super::*;
 
-    /// El CLI acepta los seis subcomandos y rechaza uno desconocido.
+    /// El CLI acepta los siete subcomandos y rechaza uno desconocido.
     #[test]
-    fn la_superficie_declara_los_seis_subcomandos() {
+    fn la_superficie_declara_los_siete_subcomandos() {
         for args in [
             vec!["ghwatch", "scan"],
             vec!["ghwatch", "report"],
             vec!["ghwatch", "diff"],
             vec!["ghwatch", "history"],
+            vec!["ghwatch", "repos"],
             vec!["ghwatch", "notify"],
             vec!["ghwatch", "init"],
         ] {

@@ -1,6 +1,6 @@
 [package]
 name = "ghwatch"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Vulnerability watch across a GitHub account's repositories: Dependabot alerts, secret scanning and OSV.dev enrichment."
 license = "MIT"
