@@ -44,12 +44,20 @@
 
 ## 3. Subcomando `repos`
 
-- [ ] 3.1 RED — escribir en `tests/cli.rs` (dentro de `mod cli`) el test de `ghwatch repos` sobre una base en memoria: listado ordenado, totales en la cabecera y código de salida 0; comando `cargo test cli`; pegar la salida en rojo.
-- [ ] 3.2 RED — escribir los tests de `--limit` (defecto 20 y `0` = todos), `--all`, `--min-severity` válido e inválido (código 2), base de datos inexistente (código 0) y `--format json`; comando `cargo test cli`; pegar la salida en rojo.
-- [ ] 3.3 GREEN — añadir la variante `Repos` al enum `Command`, sus argumentos (`--limit`, `--all`, `--min-severity`, `--format`, `--db`, `--config`) y `ejecutar_repos` siguiendo el patrón de `ejecutar_history`; confirmar con `cargo test cli`.
-- [ ] 3.4 GREEN — confirmar la ayuda: `ghwatch --help` nombra los siete subcomandos y `ghwatch repos --help` documenta todas sus opciones; comando `cargo test cli`.
-- [ ] 3.5 REFACTOR — confirmar la puerta de calidad completa: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` y `cargo test` (los 289 tests previos siguen verdes).
-- [ ] 3.6 Auditoría con `@rust-reviewer` del subcomando, de los códigos de salida y de la precedencia de configuración.
+- [x] 3.1 RED — escribir en `tests/cli.rs` (dentro de `mod cli`) el test de `ghwatch repos` sobre una base en memoria: listado ordenado, totales en la cabecera y código de salida 0; comando `cargo test cli`; pegar la salida en rojo.
+- [x] 3.2 RED — escribir los tests de `--limit` (defecto 20 y `0` = todos), `--all`, `--min-severity` válido e inválido (código 2), base de datos inexistente (código 0) y `--format json`; comando `cargo test cli`; pegar la salida en rojo.
+- [x] 3.3 GREEN — añadir la variante `Repos` al enum `Command`, sus argumentos (`--limit`, `--all`, `--min-severity`, `--format`, `--db`, `--config`) y `ejecutar_repos` siguiendo el patrón de `ejecutar_history`; confirmar con `cargo test cli`.
+- [x] 3.4 GREEN — confirmar la ayuda: `ghwatch --help` nombra los siete subcomandos y `ghwatch repos --help` documenta todas sus opciones; comando `cargo test cli`.
+- [x] 3.5 REFACTOR — confirmar la puerta de calidad completa: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` y `cargo test` (los 289 tests previos siguen verdes).
+- [x] 3.6 Auditoría con `@rust-reviewer` del subcomando, de los códigos de salida y de la precedencia de configuración.
+
+### 3.7 Endurecimiento tras la auditoría
+
+> Cambios derivados de la auditoría de la sección 3 (veredicto: aprobado con reservas).
+
+- [x] 3.7.1 Hallazgo 1 — el aviso de base inexistente pasa a `sin datos locales (ejecuta \`ghwatch scan\`)`. Verificación: `cargo test cli`.
+- [x] 3.7.2 Hallazgo 2 — test de CLI de `repos --format markdown`. Verificación: `cargo test cli`.
+- [x] 3.7.3 Hallazgo 3 — test de la ayuda de `repos` (todas sus opciones). Verificación: `cargo test cli`.
 
 ## 4. Documentación
 
