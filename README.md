@@ -59,7 +59,7 @@ use `--quiet` to silence the progress bar and the final summary.
 | `ghwatch report` | Re-emits the latest local report. **No network.** |
 | `ghwatch diff` | Shows the alerts that were new and resolved in the latest run. **No network.** |
 | `ghwatch history` | Shows the stored run series (date, total, new, resolved). **No network.** |
-| `ghwatch repos` | Lists every repository with open alerts, its alert count and its severity breakdown. **No network.** |
+| `ghwatch repos` | Lists the repositories with their alerts (state, source and minimum severity are filters), with their count and severity breakdown. **No network.** |
 | `ghwatch notify` | Resends the latest local report to Valet without rewriting it. |
 | `ghwatch init` | Creates the database and the config template, without overwriting existing ones. |
 
@@ -94,7 +94,7 @@ only the local database and the report files, so you can rerun them offline. Onl
 Run `ghwatch <subcommand> --help` for the full list.
 
 `repos` reads only the local database (it neither creates it nor touches the
-network) and prints to **stdout**:
+network) and prints to **stdout** (or to a file with `--output`):
 
 - `--limit <N>`: caps how many repositories are shown; default `20`, and `0`
   shows all.
@@ -104,17 +104,29 @@ network) and prints to **stdout**:
   repositories with at least one alert of that severity **or higher**, without
   trimming the count or the breakdown shown (the repository is listed whole);
   `unknown` lets every repository with alerts through.
-- `--format <console|json|markdown>`: output format, `console` by default, always
-  on stdout (no file is written).
+- `--source <dependabot|secret|code>`: counts only the alerts of that source.
+- `--state <open|resolved|all>`: state of the alerts counted; `open` by default.
+- `--include-empty`: also lists the inventory repositories with no alerts, at the
+  end of the order.
+- `--format <console|json|markdown>`: output format, `console` by default.
+- `--output <path>`: writes the output to that file (created or overwritten) and
+  prints nothing to stdout.
 
 ```
 $ ghwatch repos --limit 5
-ejecución #3 · generado 2026-11-07T08:25:50.008680277+00:00 · repositorios con alertas: 88 de 363 · alertas abiertas: 1330
+ejecución #3 · generado 2026-11-07T09:05:18.241919877+00:00 · repositorios: 88 de 363 · con alertas: 88 · alertas abiertas: 1330
 atareao/reto-python  112  (critical=8 high=63 medium=41 low=0 unknown=0)
 atareao/bloc  84  (critical=0 high=46 medium=29 low=9 unknown=0)
 atareao/presu  79  (critical=1 high=45 medium=29 low=4 unknown=0)
 atareao/tareas  59  (critical=0 high=32 medium=22 low=5 unknown=0)
 atareao/asistentes  55  (critical=3 high=19 medium=30 low=3 unknown=0)
+```
+
+```
+$ ghwatch repos --state resolved --all
+ejecución #3 · generado 2026-11-07T09:05:18.250108718+00:00 · repositorios: 2 de 363 · con alertas: 2 · alertas resueltas: 8
+atareao/dime  4  (critical=0 high=1 medium=1 low=2 unknown=0)
+atareao/valet-ai  4  (critical=0 high=0 medium=1 low=3 unknown=0)
 ```
 
 ## Configuration

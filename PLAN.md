@@ -174,10 +174,11 @@ falla por ello.
 - **T4.6** Doc de integración: crear ingest key, guardar el token (`~/.config/ghwatch/config.toml`,
   permisos 600, o keyring), y curl de verificación contra `GET /api/notifications/unread`.
 - **T4.7** Subcomando `ghwatch repos`: lista, **desde la base local y sin red**, cada repositorio
-  con al menos una alerta abierta (nombre, recuento y desglose por severidad), con
-  `--limit`/`--all`, `--min-severity` y `--format console|json|markdown`. **No altera el modelo de
-  datos**: lee las tablas `alerts` y `repos` ya existentes, sin migración, columnas ni índices
-  nuevos (ver §4, «Modelo de datos»).
+  con sus alertas (nombre, recuento y desglose por severidad), con `--limit`/`--all`,
+  `--min-severity`, `--state open|resolved|all` (defecto `open`), `--source
+  dependabot|secret|code`, `--include-empty`, `--format console|json|markdown` y `--output
+  <fichero>`. **No altera el modelo de datos**: lee las tablas `alerts` y `repos` ya existentes,
+  sin migración, columnas ni índices nuevos (ver §4, «Modelo de datos»).
 
 ### Fase 5 — Operación
 - **T5.1** Unidades de usuario `systemd/ghwatch.service` + `ghwatch.timer` (diario 07:00,

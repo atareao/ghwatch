@@ -56,10 +56,10 @@
 
 ## 4. Documentación
 
-- [ ] 4.1 Actualizar `AGENTS.md` (las cuatro opciones nuevas y el recuento de tests) y verificar que la lista de subcomandos coincide con `ghwatch --help`.
-- [ ] 4.2 Actualizar `PLAN.md` con las opciones nuevas y verificar que no contradice la sección de modelo de datos.
-- [ ] 4.3 Actualizar `README.md` y `README.es.md` con las cuatro opciones y un ejemplo; verificar que el ejemplo, ejecutado contra la base real, produce esa forma.
-- [ ] 4.4 Actualizar `docs/cli-repos-list.md` (funcionamiento, configuración, uso, decisiones y follow-ups) y verificar que todos los comandos que cita funcionan tal cual.
+- [x] 4.1 Actualizar `AGENTS.md` (las cuatro opciones nuevas y el recuento de tests) y verificar que la lista de subcomandos coincide con `ghwatch --help`.
+- [x] 4.2 Actualizar `PLAN.md` con las opciones nuevas y verificar que no contradice la sección de modelo de datos.
+- [x] 4.3 Actualizar `README.md` y `README.es.md` con las cuatro opciones y un ejemplo; verificar que el ejemplo, ejecutado contra la base real, produce esa forma.
+- [x] 4.4 Actualizar `docs/cli-repos-list.md` (funcionamiento, configuración, uso, decisiones y follow-ups) y verificar que todos los comandos que cita funcionan tal cual.
 
 ## 5. Verificación final
 
