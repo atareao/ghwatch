@@ -1936,4 +1936,25 @@ mod cli {
             salida.texto()
         );
     }
+
+    /// `repos` con una base de datos ilegible termina con código 5 y sin datos.
+    #[tokio::test]
+    async fn repos_con_base_ilegible_devuelve_cinco() {
+        let dir = tempfile::tempdir().expect("directorio temporal");
+
+        // La ruta de la base de datos es un directorio: sqlite no puede abrirla.
+        let db = dir.path().to_path_buf();
+
+        let builder = EnvPrueba::nuevo().auth_falla();
+        let salida = builder.salida();
+        let env = builder.construir();
+        let codigo = run_with(cli_de(&["repos", "--db", db.to_str().expect("ruta")]), env).await;
+
+        assert_eq!(codigo, EXIT_STORE);
+        assert!(
+            salida.texto().trim().is_empty(),
+            "no se emiten datos cuando la base es ilegible: {}",
+            salida.texto()
+        );
+    }
 }

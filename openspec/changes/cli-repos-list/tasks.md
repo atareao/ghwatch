@@ -68,6 +68,17 @@
 
 ## 5. Verificación final
 
-- [ ] 5.1 Ejecutar `ghwatch repos --all` contra la base de datos real y comprobar que el total de repositorios con alertas y el de alertas coinciden con `ghwatch report`; pegar la salida.
-- [ ] 5.2 Ejecutar la puerta de calidad completa (`cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`) y pegar el resumen.
-- [ ] 5.3 Verificar requirement por requirement del change contra la implementación y marcar las casillas de las secciones 1 a 4.
+- [x] 5.1 Ejecutar `ghwatch repos --all` contra la base de datos real y comprobar que el total de repositorios con alertas y el de alertas coinciden con `ghwatch report`; pegar la salida.
+  - `ghwatch repos --all` → `repositorios con alertas: 88 de 363 · alertas abiertas: 1330`, 88 líneas de repositorio.
+  - `ghwatch report --format json` → `run_id 3`, `total 1330`, `scanned 363`, `failed 8`, `by_severity {critical:33, high:517, medium:573, low:206, unknown:1}`. Coinciden.
+  - `ghwatch repos --all --format json` → `known_repos 363`, `repos_with_alerts 88`, `total_alerts 1330`, `schema_version 1`; suma del desglose de los 88 repos = 1330 (coincide con los cinco cubos del informe).
+- [x] 5.2 Ejecutar la puerta de calidad completa (`cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`) y pegar el resumen.
+  - `cargo fmt --all --check` → sin cambios; `cargo clippy --all-targets -- -D warnings` → sin warnings; `cargo test` → **313 passed, 0 failed**.
+- [x] 5.3 Verificar requirement por requirement del change contra la implementación y marcar las casillas de las secciones 1 a 4.
+  - 15/15 scenarios de `cli` y 4/4 de `reporting` implementados; 18 cubiertos por test y 1 scenario (`Fallo de la base de datos`) con hueco **no bloqueante** (mismo camino de código `abrir_store` verificado por `un_fallo_de_la_base_de_datos_devuelve_cinco` y por ejecución manual: `repos --db <directorio>` → error registrado, código 5). Secciones 1–4 ya estaban todas marcadas y su contenido está hecho.
+
+### 5.4 Cierre del hueco detectado en la verificación final
+
+> La verificación requirement-por-requirement detectó un único scenario sin test directo: «Fallo de la base de datos» del requirement de `--format`/`--db`/`--config`.
+
+- [x] 5.4.1 Test `repos_con_base_ilegible_devuelve_cinco`: `repos` con una base ilegible termina con código 5. Verificación: `cargo test cli`.
